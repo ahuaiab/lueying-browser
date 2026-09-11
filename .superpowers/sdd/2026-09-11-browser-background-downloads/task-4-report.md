@@ -6,6 +6,8 @@ Implemented and committed Task 4 on `codex-browser-background-downloads`.
 
 Implementation commit: `5254333d758f2cfe978fc0b2829c2ec54ca3d881` (`feat:wire-download-service-lifecycle`)
 
+Review repair commit: `1f08c9d8b06915c9292992abb87eb33e677e2c2d` (`fix-download-lifecycle-recovery`)
+
 ## Changed files
 
 - `app/entry/src/main/ets/browser/components/BrowserShell.ets`
@@ -63,6 +65,39 @@ Implementation commit: `5254333d758f2cfe978fc0b2829c2ec54ca3d881` (`feat:wire-do
 
 ## Concerns
 
-- The focused local tests could not reach runtime because hvigor compiles all registered `src/test` files and the existing Task 1-3 fixtures fail strict UnitTestArkTS compilation. The main and ohosTest compile gates are green.
+- The initial repair-round local-test attempt exposed strict UnitTestArkTS fixture errors; those fixtures were corrected in the repair commit. The final focused local run reached runtime and passed all 17 tests.
 - Task 4 wires manager state and actions but intentionally does not add the manager sheet UI; that component belongs to Task 6 in the plan.
 - Runtime notification permission, request-agent restoration, and real background continuation still require device validation in the later end-to-end task.
+
+## Review repair round: Important 1-3
+
+The repair commit adds a service-level restore gate and serialized operation queue, makes `DownloadStore` merge live records and serialize persistence across restore/begin, detaches old agent listeners on rebind while leaving system tasks running, and makes request-agent search/get/show failures resolve into a retained, published local snapshot. `BrowserDownloadLifecycle` now detaches its identity-bound UI listener on stop and safely republishes the service snapshot when restore fails.
+
+### Changed files in repair commit
+
+- `app/entry/src/main/ets/browser/components/BrowserShell.ets`
+- `app/entry/src/main/ets/browser/data/DownloadStore.ets`
+- `app/entry/src/main/ets/browser/web/DownloadService.ets`
+- `app/entry/src/main/ets/browser/web/RequestAgentGateway.ets`
+- `app/entry/src/test/ets/test/BrowserDownloadLifecycle.test.ets`
+- `app/entry/src/test/ets/test/DownloadAgentPorts.test.ets`
+- `app/entry/src/test/ets/test/DownloadService.test.ets`
+
+### Final commands and results
+
+- `set DEVECO_HOME=C:\PROGRA~1\Huawei\DEVECO~1&&devecocli build --product default --modules entry --build-mode debug`
+  - `BUILD SUCCESSFUL in 12 s 622 ms`; 33 tasks, 27 executed, 6 up-to-date.
+- `set DEVECO_HOME=C:\PROGRA~1\Huawei\DEVECO~1&&devecocli build --product default --modules entry@ohosTest --build-mode debug`
+  - `BUILD SUCCESSFUL in 2 s 834 ms`; 35 tasks, 18 executed, 17 up-to-date.
+- `set DEVECO_HOME=C:\PROGRA~1\Huawei\DEVECO~1&&set DEVECO_SDK_HOME=C:\PROGRA~1\Huawei\DEVECO~1\sdk&&set PATH=C:\PROGRA~1\Huawei\DEVECO~1\tools\hvigor\bin;%PATH%&&python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\OneDrive\HarmonyOS\jianyue-browser\.superpowers\worktrees\browser-downloads\app --module entry --no-coverage --scope BrowserDownloadLifecycle,DownloadService`
+  - Command exit code 0; result file reports `Tests run: 17, Failure: 0, Error: 0, Pass: 17, Ignore: 0`.
+  - Exact non-blocking warning: `Failed to parse build-profile.json5 for srcPath lookup: json5 is required because no 'module' parameter was provided ... Result file paths will fall back to <project_path>/<module_name>.` The explicit `--module entry` run still produced and validated the result file.
+- `git diff --check`
+  - Passed; Git only reported existing LF-to-CRLF working-copy notices.
+- `git diff -- README.md LICENSE`
+  - Empty; neither file was modified.
+
+### Remaining concerns
+
+- No device/emulator runtime validation was available in this round; notification permission and real request-agent background continuation remain end-to-end concerns.
+- Both compile gates retain the existing no-signing-config warning; the main build also reports existing system-capability/throw-handling warnings.
