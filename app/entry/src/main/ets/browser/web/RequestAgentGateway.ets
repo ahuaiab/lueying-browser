@@ -64,7 +64,7 @@ export interface RequestAgentSystemTask {
 export interface RequestAgentClient {
   create(config: RequestAgentSystemConfig): Promise<RequestAgentSystemTask>;
   getTask(taskId: string): Promise<RequestAgentSystemTask | undefined>;
-  search(): Promise<string[]>;
+  search(): Promise<AgentTaskSnapshot[]>;
   show(taskId: string): Promise<AgentTaskSnapshot | undefined>;
 }
 
@@ -139,7 +139,7 @@ class HarmonyRequestAgentClient implements RequestAgentClient {
       notification: {
         title: input.title,
         text: '下载中',
-        visibility: request.agent.Visibility.VISIBILITY_PROGRESS_AND_COMPLETION
+        visibility: request.agent.VISIBILITY_COMPLETION | request.agent.VISIBILITY_PROGRESS
       }
     };
     return new HarmonyRequestAgentTask(await request.agent.create(this.context, config));
@@ -153,30 +153,39 @@ class HarmonyRequestAgentClient implements RequestAgentClient {
     }
   }
 
-  async search(): Promise<string[]> {
-    return await request.agent.search({
+  async search(): Promise<AgentTaskSnapshot[]> {
+    const tasks: Array<string | request.agent.TaskInfo> = await request.agent.search({
       action: request.agent.Action.DOWNLOAD,
       mode: request.agent.Mode.BACKGROUND
     });
+    const snapshots: Array<AgentTaskSnapshot | undefined> = await Promise.all(tasks.map(
+      (task: string | request.agent.TaskInfo): Promise<AgentTaskSnapshot | undefined> =>
+        typeof task === 'string' ? this.show(task) : Promise.resolve(this.snapshotForTaskInfo(task))
+    ));
+    return snapshots.filter((snapshot: AgentTaskSnapshot | undefined): snapshot is AgentTaskSnapshot => snapshot !== undefined);
   }
 
   async show(taskId: string): Promise<AgentTaskSnapshot | undefined> {
     try {
       const task: request.agent.TaskInfo = await request.agent.show(taskId);
-      const totalBytes: number = task.progress.sizes.length === 0 ? -1 : task.progress.sizes[0];
-      return {
-        taskId: task.tid,
-        status: String(task.state),
-        receivedBytes: task.progress.processed,
-        totalBytes,
-        percent: percentForAgent(task.progress.processed, totalBytes),
-        description: task.description,
-        savePath: task.saveas,
-        error: task.reason
-      };
+      return this.snapshotForTaskInfo(task);
     } catch (_error) {
       return undefined;
     }
+  }
+
+  private snapshotForTaskInfo(task: request.agent.TaskInfo): AgentTaskSnapshot {
+    const totalBytes: number = task.progress.sizes.length === 0 ? -1 : task.progress.sizes[0];
+    return {
+      taskId: task.tid,
+      status: String(task.state),
+      receivedBytes: task.progress.processed,
+      totalBytes,
+      percent: percentForAgent(task.progress.processed, totalBytes),
+      description: task.description,
+      savePath: task.saveas,
+      error: task.reason
+    };
   }
 }
 
@@ -243,12 +252,9 @@ export class RequestAgentGateway implements AgentDownloadPort {
   }
 
   async searchByPrefix(prefix: string): Promise<AgentTaskSnapshot[]> {
-    const taskIds: string[] = await this.client.search();
-    const snapshots: Array<AgentTaskSnapshot | undefined> = await Promise.all(
-      taskIds.map((taskId: string) => this.show(taskId))
-    );
-    return snapshots.filter((snapshot: AgentTaskSnapshot | undefined): snapshot is AgentTaskSnapshot =>
-      snapshot !== undefined && (snapshot.description ?? '').startsWith(prefix)
+    const snapshots: AgentTaskSnapshot[] = await this.client.search();
+    return snapshots.filter((snapshot: AgentTaskSnapshot): boolean =>
+      (snapshot.description ?? '').startsWith(prefix)
     );
   }
 

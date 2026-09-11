@@ -49,8 +49,11 @@ class FakeRequestClient implements RequestAgentClient {
     return taskId === this.task.taskId ? this.task : undefined;
   }
 
-  async search(): Promise<string[]> {
-    return [this.task.taskId];
+  async search(): Promise<AgentTaskSnapshot[]> {
+    return [
+      { taskId: this.task.taskId, status: 'RUNNING', receivedBytes: 8, totalBytes: 10, percent: 80, description: 'jianyue-download:key-1' },
+      { taskId: 'other-agent', status: 'RUNNING', receivedBytes: 1, totalBytes: 2, percent: 50, description: 'other-download:key-2' }
+    ];
   }
 
   async show(taskId: string): Promise<AgentTaskSnapshot | undefined> {
@@ -102,6 +105,7 @@ export default function downloadAgentPortsTest() {
       expect(progress?.percent).assertEqual(40);
       expect(completed?.status).assertEqual('COMPLETED');
       expect(JSON.stringify(await gateway.show('agent-1')).includes('session=secret')).assertFalse();
+      expect((await gateway.searchByPrefix('jianyue-download:')).length).assertEqual(1);
     });
 
     it('requests notification permission once and returns false after rejection', 0, async () => {

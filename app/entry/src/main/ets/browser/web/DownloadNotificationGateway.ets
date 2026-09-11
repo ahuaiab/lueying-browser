@@ -11,7 +11,7 @@ export interface NotificationRequestClient {
 
 class HarmonyNotificationRequestClient implements NotificationRequestClient {
   async requestEnableNotification(context: Context): Promise<void> {
-    notificationManager.requestEnableNotification(context);
+    return await notificationManager.requestEnableNotification(context);
   }
 }
 
