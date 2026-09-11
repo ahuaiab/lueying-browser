@@ -12,6 +12,7 @@ import {
   nativeTabIndexForId,
   tabTransitionSceneVisualState
 } from '../../../main/ets/browser/model/SafariTabTransition';
+import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 
 export default function safariTabTransitionTest() {
   describe('SafariTabTransition', () => {
@@ -111,6 +112,10 @@ export default function safariTabTransitionTest() {
       expect(addressItemLeft(2, 1, 328, 10, -200, 400)).assertEqual(205);
       expect(addressItemLeft(2, 1, 328, 10, -400, 400)).assertEqual(36);
       expect(addressItemLeft(2, 2, 328, 10, 0, 400)).assertEqual(36);
+    });
+
+    it('keeps address capsule corners aligned with the bottom chrome', 0, () => {
+      expect(safariAddressItemWidth(400)).assertEqual(384);
     });
 
     it('primes a render-only pending tab before a final-tab gesture moves', 0, () => {

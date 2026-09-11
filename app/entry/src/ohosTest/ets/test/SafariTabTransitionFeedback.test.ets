@@ -11,8 +11,10 @@ import {
   addressEditorText,
   syncAddressDraft,
   canStartAddressStripGesture,
-  closedAddressEditorState
+  closedAddressEditorState,
+  addressCollapsedTextPaddingFor
 } from '../../../main/ets/browser/model/BrowserInteraction';
+import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 
 export default function safariTabTransitionFeedbackTest() {
   describe('SafariTabTransitionFeedback', () => {
@@ -102,6 +104,20 @@ export default function safariTabTransitionFeedbackTest() {
       expect(state.barMode).assertEqual('collapsed');
       expect(state.inputExpandProgress).assertEqual(0);
       expect(state.addressInputFocusEnabled).assertTrue();
+    });
+
+    it('reserves a symmetric lock-safe zone for collapsed web addresses', 0, () => {
+      const securePadding = addressCollapsedTextPaddingFor(true);
+      expect(securePadding.left).assertEqual(40);
+      expect(securePadding.right).assertEqual(40);
+
+      const startPagePadding = addressCollapsedTextPaddingFor(false);
+      expect(startPagePadding.left).assertEqual(0);
+      expect(startPagePadding.right).assertEqual(0);
+    });
+
+    it('keeps address capsule corners aligned with the bottom chrome', 0, () => {
+      expect(safariAddressItemWidth(400)).assertEqual(384);
     });
   });
 }

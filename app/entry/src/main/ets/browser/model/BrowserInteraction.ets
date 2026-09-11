@@ -3,6 +3,7 @@ import {
   loadableUrlFor,
   searchQueryTextFor
 } from './BrowserTypes';
+import { SAFARI_ADDRESS_LOCK_SAFE_INSET_VP } from './BrowserVisualMetrics';
 
 /**
  * Returns whether the embedded ArkWeb surface should participate in hit
@@ -285,6 +286,17 @@ export type AddressTextAlignment = 'start' | 'center';
 
 export function addressTextAlignmentFor(editorActive: boolean): AddressTextAlignment {
   return editorActive ? 'start' : 'center';
+}
+
+export interface AddressTextPadding {
+  left: number;
+  right: number;
+}
+
+/** Keep collapsed web-address text clear of the leading security control. */
+export function addressCollapsedTextPaddingFor(hasSecurityControl: boolean): AddressTextPadding {
+  const inset: number = hasSecurityControl ? SAFARI_ADDRESS_LOCK_SAFE_INSET_VP : 0;
+  return { left: inset, right: inset };
 }
 
 /** The clear affordance belongs only to a focused, mounted address editor. */

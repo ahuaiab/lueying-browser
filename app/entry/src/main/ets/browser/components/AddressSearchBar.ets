@@ -23,9 +23,11 @@ import {
   addressLockImageVerticalOffsetFor,
   addressLockVerticalOffsetFor,
   addressTextAlignmentFor,
+  addressCollapsedTextPaddingFor,
   placeholderForFocus,
   syncAddressDraft
 } from '../model/BrowserInteraction';
+import { SAFARI_ADDRESS_LOCK_SAFE_INSET_VP } from '../model/BrowserVisualMetrics';
 
 /**
  * Safari-like address/search chrome. The search field is intentionally a
@@ -344,12 +346,14 @@ export struct AddressSearchBar {
             .opacity(this.editorClosing ? this.editorCollapseProgress() : 1)
             .backgroundColor(Color.Transparent)
             .padding({
-              left: addressTextAlignmentFor(this.editorActive) === 'start' ? 40 : 0,
+              left: addressTextAlignmentFor(this.editorActive) === 'start'
+                ? SAFARI_ADDRESS_LOCK_SAFE_INSET_VP
+                : 0,
               right: addressClearButtonVisibleFor(
                 this.editorActive,
                 this.inputMounted,
                 this.addressInputFocused
-              ) ? 40 : 0
+              ) ? SAFARI_ADDRESS_LOCK_SAFE_INSET_VP : 0
             })
             .onFocus(() => {
               this.addressInputFocused = true;
@@ -382,6 +386,7 @@ export struct AddressSearchBar {
               .fontSize(16)
               .fontColor(this.visibleAddress().length > 0 ? '#1D1D1F' : '#6B7280')
               .textAlign(TextAlign.Center)
+              .padding(addressCollapsedTextPaddingFor(!this.isStartPage()))
               // The unfocused label is display-only.  Explicitly disable
               // ArkUI text selection so a long/slow horizontal drag cannot
               // open the system selection handles instead of the tab swipe.
@@ -398,6 +403,7 @@ export struct AddressSearchBar {
               .fontColor('#1D1D1F')
               .textAlign(TextAlign.Center)
               .textSelectable(TextSelectableMode.UNSELECTABLE)
+              .padding(addressCollapsedTextPaddingFor(!this.isStartPage()))
               .opacity(1 - this.editorCollapseProgress())
               .hitTestBehavior(HitTestMode.None);
           }
