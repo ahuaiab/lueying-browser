@@ -12,7 +12,8 @@ import {
   syncAddressDraft,
   canStartAddressStripGesture,
   closedAddressEditorState,
-  addressCollapsedTextPaddingFor
+  addressCollapsedTextPaddingFor,
+  addressEditorLeftPaddingFor
 } from '../../../main/ets/browser/model/BrowserInteraction';
 import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 
@@ -114,6 +115,11 @@ export default function safariTabTransitionFeedbackTest() {
       const startPagePadding = addressCollapsedTextPaddingFor(false);
       expect(startPagePadding.left).assertEqual(0);
       expect(startPagePadding.right).assertEqual(0);
+    });
+
+    it('starts the blank-page editor at the capsule content edge', 0, () => {
+      expect(addressEditorLeftPaddingFor(true)).assertEqual(40);
+      expect(addressEditorLeftPaddingFor(false)).assertEqual(0);
     });
 
     it('keeps address capsule corners aligned with the bottom chrome', 0, () => {

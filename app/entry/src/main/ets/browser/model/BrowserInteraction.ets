@@ -293,9 +293,14 @@ export interface AddressTextPadding {
   right: number;
 }
 
+/** Keep editable web-address text clear of the leading security control. */
+export function addressEditorLeftPaddingFor(hasSecurityControl: boolean): number {
+  return hasSecurityControl ? SAFARI_ADDRESS_LOCK_SAFE_INSET_VP : 0;
+}
+
 /** Keep collapsed web-address text clear of the leading security control. */
 export function addressCollapsedTextPaddingFor(hasSecurityControl: boolean): AddressTextPadding {
-  const inset: number = hasSecurityControl ? SAFARI_ADDRESS_LOCK_SAFE_INSET_VP : 0;
+  const inset: number = addressEditorLeftPaddingFor(hasSecurityControl);
   return { left: inset, right: inset };
 }
 

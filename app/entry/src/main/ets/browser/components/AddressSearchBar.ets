@@ -24,6 +24,7 @@ import {
   addressLockVerticalOffsetFor,
   addressTextAlignmentFor,
   addressCollapsedTextPaddingFor,
+  addressEditorLeftPaddingFor,
   placeholderForFocus,
   syncAddressDraft
 } from '../model/BrowserInteraction';
@@ -347,7 +348,7 @@ export struct AddressSearchBar {
             .backgroundColor(Color.Transparent)
             .padding({
               left: addressTextAlignmentFor(this.editorActive) === 'start'
-                ? SAFARI_ADDRESS_LOCK_SAFE_INSET_VP
+                ? addressEditorLeftPaddingFor(!this.isStartPage())
                 : 0,
               right: addressClearButtonVisibleFor(
                 this.editorActive,
