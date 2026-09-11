@@ -15,7 +15,8 @@ import {
   AgentDownloadPort,
   AgentTaskHandle,
   AgentTaskSnapshot,
-  AgentTaskStatus
+  AgentTaskStatus,
+  isAgentQueryNotFound
 } from './RequestAgentGateway';
 import { WebDownloadHandler } from './WebTabNode';
 
@@ -82,8 +83,10 @@ export class DownloadService implements WebDownloadHandler {
         let handle: AgentTaskHandle | undefined = undefined;
         try {
           handle = await this.agent.getTask(task.agentTaskId);
-        } catch (_error) {
-          queryFailures.add(task.id);
+        } catch (error) {
+          if (!isAgentQueryNotFound(error)) {
+            queryFailures.add(task.id);
+          }
           handle = undefined;
         }
         if (handle !== undefined) {
@@ -92,8 +95,10 @@ export class DownloadService implements WebDownloadHandler {
         let shown: AgentTaskSnapshot | undefined = undefined;
         try {
           shown = await this.agent.show(task.agentTaskId);
-        } catch (_error) {
-          queryFailures.add(task.id);
+        } catch (error) {
+          if (!isAgentQueryNotFound(error)) {
+            queryFailures.add(task.id);
+          }
           shown = undefined;
         }
         if (shown !== undefined) {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@ohos/hypium';
+import { Context } from '@kit.AbilityKit';
 import { webview } from '@kit.ArkWeb';
 import { DownloadStore, DownloadRecordStorage } from '../../../main/ets/browser/data/DownloadStore';
 import {
@@ -11,7 +12,11 @@ import {
   AgentDownloadPort,
   AgentTaskHandle,
   AgentTaskSnapshot,
-  AgentTaskStatus
+  AgentTaskStatus,
+  RequestAgentClient,
+  RequestAgentGateway,
+  RequestAgentSystemConfig,
+  RequestAgentSystemTask
 } from '../../../main/ets/browser/web/RequestAgentGateway';
 import { NotificationPermissionPort } from '../../../main/ets/browser/web/DownloadNotificationGateway';
 import { DownloadService, WebCookiePort } from '../../../main/ets/browser/web/DownloadService';
@@ -120,6 +125,24 @@ class FakeAgent implements AgentDownloadPort {
   async show(_taskId: string): Promise<AgentTaskSnapshot | undefined> {
     this.showCalls += 1;
     return this.showSnapshot;
+  }
+}
+
+class RejectingRequestAgentClient implements RequestAgentClient {
+  async create(_config: RequestAgentSystemConfig): Promise<RequestAgentSystemTask> {
+    throw new Error('not used');
+  }
+
+  async getTask(_taskId: string): Promise<RequestAgentSystemTask | undefined> {
+    return undefined;
+  }
+
+  async search(): Promise<AgentTaskSnapshot[]> {
+    throw new Error('request-agent search unavailable');
+  }
+
+  async show(_taskId: string): Promise<AgentTaskSnapshot | undefined> {
+    return undefined;
   }
 }
 
@@ -259,6 +282,32 @@ export default function downloadServiceTest() {
       expect(setup.service.snapshot().length).assertEqual(1);
       expect(setup.service.snapshot()[0].id).assertEqual('web-guid-1');
       expect(setup.service.snapshot()[0].status).assertEqual(DownloadStatus.RUNNING);
+    });
+
+    it('retains and publishes a persisted task when the gateway search IPC rejects', 0, async () => {
+      const storage: MemoryStorage = new MemoryStorage();
+      storage.records = [{
+        id: 'web-guid-1', agentTaskId: 'agent-1', reconcileKey: 'web-guid-1', tabId: 'tab-1',
+        url: 'https://example.com/archive.zip', filename: 'archive.zip', backend: DownloadBackend.REQUEST_AGENT,
+        status: DownloadStatus.RUNNING, receivedBytes: 4, totalBytes: 100, percent: 4,
+        createdAt: 1, updatedAt: 1, isPrivate: false
+      } as DownloadTaskRecord];
+      const gateway: RequestAgentGateway = new RequestAgentGateway(
+        {} as Context, new RejectingRequestAgentClient());
+      const service: DownloadService = new DownloadService(
+        new DownloadStore(storage, () => 100), gateway, new FakeNotificationPort(), new FakeCookiePort(),
+        '/data/storage/el2/base/files', () => 100);
+      const published: DownloadTaskRecord[][] = [];
+      service.setListener((tasks: DownloadTaskRecord[]) => published.push(tasks));
+
+      await service.restore();
+
+      expect(service.snapshot().length).assertEqual(1);
+      expect(service.snapshot()[0].status).assertEqual(DownloadStatus.RUNNING);
+      expect((service.snapshot()[0].error ?? '').length > 0).assertTrue();
+      const latest: DownloadTaskRecord[] = published[published.length - 1];
+      expect(latest.length).assertEqual(1);
+      expect(latest[0].status).assertEqual(DownloadStatus.RUNNING);
     });
 
     it('persists the agent handoff before cancelling ArkWeb', 0, async () => {

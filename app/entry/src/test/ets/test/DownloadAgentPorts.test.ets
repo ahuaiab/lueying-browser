@@ -55,7 +55,7 @@ class FakeRequestClient implements RequestAgentClient {
   async search(): Promise<AgentTaskSnapshot[]> {
     return [
       { taskId: this.task.taskId, status: AgentTaskStatus.RUNNING, receivedBytes: 8, totalBytes: 10, percent: 80, description: 'jianyue-download:key-1' },
-      { taskId: 'other-agent', status: AgentTaskStatus.RUNNING, receivedBytes: 1, totalBytes: 2, percent: 50, description: 'jianyue-download:key-2' }
+      { taskId: 'other-agent', status: AgentTaskStatus.RUNNING, receivedBytes: 1, totalBytes: 2, percent: 50, description: 'other-agent:key-2' }
     ];
   }
 

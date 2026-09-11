@@ -20,6 +20,49 @@ export enum AgentTaskStatus {
   CANCELLED = 'CANCELLED'
 }
 
+const REQUEST_AGENT_TASK_NOT_FOUND_CODE: number = 21900006;
+
+interface RequestAgentErrorLike {
+  code?: number;
+  message?: string;
+}
+
+export enum AgentQueryFailureKind {
+  UNAVAILABLE = 'unavailable',
+  NOT_FOUND = 'not-found'
+}
+
+export class AgentQueryError extends Error {
+  readonly kind: AgentQueryFailureKind;
+  readonly code: number;
+
+  constructor(kind: AgentQueryFailureKind, code: number, message: string) {
+    super(message);
+    this.kind = kind;
+    this.code = code;
+  }
+}
+
+export function isAgentQueryNotFound(error: Error): boolean {
+  const candidate: RequestAgentErrorLike = error as RequestAgentErrorLike;
+  const typed: AgentQueryError = error as AgentQueryError;
+  return candidate.code === REQUEST_AGENT_TASK_NOT_FOUND_CODE ||
+    typed.kind === AgentQueryFailureKind.NOT_FOUND;
+}
+
+function toAgentQueryError(operation: string, error: Error): AgentQueryError {
+  if (error instanceof AgentQueryError) {
+    return error;
+  }
+  const candidate: RequestAgentErrorLike = error as RequestAgentErrorLike;
+  const code: number = candidate.code ?? -1;
+  const kind: AgentQueryFailureKind = code === REQUEST_AGENT_TASK_NOT_FOUND_CODE
+    ? AgentQueryFailureKind.NOT_FOUND
+    : AgentQueryFailureKind.UNAVAILABLE;
+  const detail: string = candidate.message ?? 'IPC query failed';
+  return new AgentQueryError(kind, code, `${operation}: ${detail}`);
+}
+
 export interface AgentTaskSnapshot {
   taskId: string;
   status: AgentTaskStatus;
@@ -209,8 +252,11 @@ class HarmonyRequestAgentClient implements RequestAgentClient {
   async getTask(taskId: string): Promise<RequestAgentSystemTask | undefined> {
     try {
       return new HarmonyRequestAgentTask(await request.agent.getTask(this.context, taskId));
-    } catch (_error) {
-      return undefined;
+    } catch (error) {
+      if (isAgentQueryNotFound(error)) {
+        return undefined;
+      }
+      throw toAgentQueryError('getTask', error);
     }
   }
 
@@ -235,8 +281,11 @@ class HarmonyRequestAgentClient implements RequestAgentClient {
     try {
       const task: request.agent.TaskInfo = await request.agent.show(taskId);
       return this.snapshotForTaskInfo(task);
-    } catch (_error) {
-      return undefined;
+    } catch (error) {
+      if (isAgentQueryNotFound(error)) {
+        return undefined;
+      }
+      throw toAgentQueryError('show', error);
     }
   }
 
@@ -319,23 +368,38 @@ export class RequestAgentGateway implements AgentDownloadPort {
   }
 
   async getTask(taskId: string): Promise<AgentTaskHandle | undefined> {
-    const task: RequestAgentSystemTask | undefined = await this.client.getTask(taskId);
-    return task === undefined ? undefined : new GatewayTaskHandle(task);
+    try {
+      const task: RequestAgentSystemTask | undefined = await this.client.getTask(taskId);
+      return task === undefined ? undefined : new GatewayTaskHandle(task);
+    } catch (error) {
+      const failure: AgentQueryError = toAgentQueryError('getTask', error);
+      if (failure.kind === AgentQueryFailureKind.NOT_FOUND) {
+        return undefined;
+      }
+      throw failure;
+    }
   }
 
   async searchByPrefix(prefix: string): Promise<AgentTaskSnapshot[]> {
-    let snapshots: AgentTaskSnapshot[] = [];
     try {
-      snapshots = await this.client.search();
-    } catch (_error) {
-      return [];
+      const snapshots: AgentTaskSnapshot[] = await this.client.search();
+      return snapshots.filter((snapshot: AgentTaskSnapshot): boolean =>
+        (snapshot.description ?? '').startsWith(prefix)
+      );
+    } catch (error) {
+      throw toAgentQueryError('search', error);
     }
-    return snapshots.filter((snapshot: AgentTaskSnapshot): boolean =>
-      (snapshot.description ?? '').startsWith(prefix)
-    );
   }
 
   async show(taskId: string): Promise<AgentTaskSnapshot | undefined> {
-    return await this.client.show(taskId);
+    try {
+      return await this.client.show(taskId);
+    } catch (error) {
+      const failure: AgentQueryError = toAgentQueryError('show', error);
+      if (failure.kind === AgentQueryFailureKind.NOT_FOUND) {
+        return undefined;
+      }
+      throw failure;
+    }
   }
 }
