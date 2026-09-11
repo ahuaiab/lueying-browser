@@ -13,7 +13,8 @@ import {
   canStartAddressStripGesture,
   closedAddressEditorState,
   addressCollapsedTextPaddingFor,
-  addressEditorLeftPaddingFor
+  addressEditorLeftPaddingFor,
+  addressTextColorFor
 } from '../../../main/ets/browser/model/BrowserInteraction';
 import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 
@@ -120,6 +121,11 @@ export default function safariTabTransitionFeedbackTest() {
     it('starts the blank-page editor at the capsule content edge', 0, () => {
       expect(addressEditorLeftPaddingFor(true)).assertEqual(40);
       expect(addressEditorLeftPaddingFor(false)).assertEqual(0);
+    });
+
+    it('uses one color contract for address content and placeholders', 0, () => {
+      expect(addressTextColorFor(true)).assertEqual('#1D1D1F');
+      expect(addressTextColorFor(false)).assertEqual('#6B7280');
     });
 
     it('keeps address capsule corners aligned with the bottom chrome', 0, () => {

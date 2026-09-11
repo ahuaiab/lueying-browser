@@ -28,6 +28,7 @@ import {
   shouldRenderAddressItem,
   shouldRenderPendingTabPreview
 } from '../model/SafariTabTransition';
+import { addressTextColorFor } from '../model/BrowserInteraction';
 import { TabPreviewKind } from '../model/TabGestureMotion';
 import { AddressSearchBar } from './AddressSearchBar';
 
@@ -307,7 +308,7 @@ export struct AddressTabStrip {
             .scale({ x: this.handoffPlusScale(), y: this.handoffPlusScale() });
           Text('搜索或输入网站')
             .fontSize(16)
-            .fontColor('#6B7280')
+            .fontColor(addressTextColorFor(false))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .textAlign(TextAlign.Start)

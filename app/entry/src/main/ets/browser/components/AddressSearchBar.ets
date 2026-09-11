@@ -23,6 +23,7 @@ import {
   addressLockImageVerticalOffsetFor,
   addressLockVerticalOffsetFor,
   addressTextAlignmentFor,
+  addressTextColorFor,
   addressCollapsedTextPaddingFor,
   addressEditorLeftPaddingFor,
   placeholderForFocus,
@@ -341,6 +342,8 @@ export struct AddressSearchBar {
             // selection handles instead of forwarding the tab transition.
             .hitTestBehavior(this.addressInputFocused ? HitTestMode.Default : HitTestMode.None)
             .fontSize(16)
+            .fontColor(addressTextColorFor(true))
+            .placeholderColor(addressTextColorFor(false))
             .textAlign(addressTextAlignmentFor(this.editorActive) === 'start'
               ? TextAlign.Start
               : TextAlign.Center)
@@ -385,7 +388,7 @@ export struct AddressSearchBar {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .fontSize(16)
-              .fontColor(this.visibleAddress().length > 0 ? '#1D1D1F' : '#6B7280')
+              .fontColor(addressTextColorFor(this.visibleAddress().length > 0))
               .textAlign(TextAlign.Center)
               .padding(addressCollapsedTextPaddingFor(!this.isStartPage()))
               // The unfocused label is display-only.  Explicitly disable
@@ -401,7 +404,7 @@ export struct AddressSearchBar {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .fontSize(16)
-              .fontColor('#1D1D1F')
+              .fontColor(addressTextColorFor(this.visibleAddress().length > 0))
               .textAlign(TextAlign.Center)
               .textSelectable(TextSelectableMode.UNSELECTABLE)
               .padding(addressCollapsedTextPaddingFor(!this.isStartPage()))

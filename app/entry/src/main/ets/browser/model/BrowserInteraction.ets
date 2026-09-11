@@ -288,6 +288,11 @@ export function addressTextAlignmentFor(editorActive: boolean): AddressTextAlign
   return editorActive ? 'start' : 'center';
 }
 
+/** Keep address content and placeholder text visually consistent across states. */
+export function addressTextColorFor(hasContent: boolean): string {
+  return hasContent ? '#1D1D1F' : '#6B7280';
+}
+
 export interface AddressTextPadding {
   left: number;
   right: number;
