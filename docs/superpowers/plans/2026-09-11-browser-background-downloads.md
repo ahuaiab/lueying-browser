@@ -21,6 +21,7 @@
 - 任务元数据不持久化 Cookie、Authorization 或请求头；系统任务以 reconcileKey 去重，恢复失败不得自动创建第二个下载。
 - 每个实现任务遵循 TDD：先添加会失败的测试，再写最小生产实现，再运行通过验证，最后单独提交。
 - 所有 HarmonyOS 构建、设备、模拟器和 UI 检查使用 devecocli；环境变量使用 DEVECO_HOME=C:\PROGRA~1\Huawei\DEVECO~1。
+- ArkTS Local Test 使用 D:\.codex\skills\hmos-local-test\scripts\run_local_test.py；每个测试任务在步骤中传入对应的 suite 名，devecocli build 只作为编译门禁。
 - 构建得到的 HAP 继续保存到根目录 hap，名称使用 YYYYMMDD-HHmmss-entry-debug.hap。
 - 保留当前工作区已有的 README.md 修改和未跟踪的 LICENSE，不将它们加入本功能提交。
 
@@ -100,6 +101,12 @@ devecocli build --modules entry@ohosTest --build-mode debug
 
 Expected: FAIL because DownloadModels.ets and its exports do not exist yet.
 
+Run the failing suite:
+
+~~~cmd
+python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\OneDrive\HarmonyOS\jianyue-browser\.superpowers\worktrees\browser-downloads --module entry --no-coverage --scope DownloadModels
+~~~
+
 - [ ] Step 3: Implement the pure model.
 
 Use this exact routing rule:
@@ -130,6 +137,12 @@ devecocli build --modules entry@ohosTest --build-mode debug
 ~~~
 
 Expected: PASS for the new model test compilation and no regression in existing suites.
+
+Run the passing suite with the same command and require a successful JSON result with zero failed cases:
+
+~~~cmd
+python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\OneDrive\HarmonyOS\jianyue-browser\.superpowers\worktrees\browser-downloads --module entry --no-coverage --scope DownloadModels
+~~~
 
 - [ ] Step 6: Commit the self-contained model change.
 
