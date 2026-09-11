@@ -9,6 +9,7 @@ import {
   addressSearchBarDownloadProps,
   addressLeadingActionVisibleFor,
   addressInputLeftPaddingFor,
+  addressInputLayerOrder,
   downloadProgressRingProps
 } from '../../../main/ets/browser/components/AddressSearchBar';
 import {
@@ -173,8 +174,15 @@ export default function downloadProgressUiTest() {
       expect(addressLeadingActionVisibleFor(false, true)).assertFalse();
     });
 
-    it('removes the leading inset whenever the address input is focused', 0, () => {
-      expect(addressInputLeftPaddingFor(false, true)).assertEqual(0);
+    it('keeps a small caret inset whenever the address input is focused', 0, () => {
+      expect(addressInputLeftPaddingFor(false, true) > 0).assertTrue();
+    });
+
+    it('keeps the clear-button overlay narrow and above the editor surface', 0, () => {
+      const layerOrder = addressInputLayerOrder();
+      expect(layerOrder.clearButtonContainerWidth).assertEqual(32);
+      expect(layerOrder.editor < layerOrder.clearButtonContainer).assertTrue();
+      expect(layerOrder.clearButtonContainer < layerOrder.clearButton).assertTrue();
     });
   });
 }

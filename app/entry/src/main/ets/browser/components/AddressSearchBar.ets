@@ -95,13 +95,36 @@ export function addressLeadingActionVisibleFor(
   return !isStartPage && !addressInputFocused;
 }
 
+/** Keep the native caret clear of TextInput's clipped left edge when focused. */
+const ADDRESS_EDITOR_CARET_SAFE_INSET_VP: number = 4;
+
 export function addressInputLeftPaddingFor(
   isStartPage: boolean,
   addressInputFocused: boolean
 ): number {
+  if (addressInputFocused) {
+    return ADDRESS_EDITOR_CARET_SAFE_INSET_VP;
+  }
   return addressEditorLeftPaddingFor(
     addressLeadingActionVisibleFor(isStartPage, addressInputFocused)
   );
+}
+
+export interface AddressInputLayerOrder {
+  clearButtonContainer: number;
+  editor: number;
+  clearButton: number;
+  clearButtonContainerWidth: number;
+}
+
+/** Keep the full-width clear-button container from covering the editor surface. */
+export function addressInputLayerOrder(): AddressInputLayerOrder {
+  return {
+    clearButtonContainer: 2,
+    editor: 1,
+    clearButton: 3,
+    clearButtonContainerWidth: 32
+  };
 }
 
 /**
@@ -427,17 +450,18 @@ export struct AddressSearchBar {
                 .padding(0)
                 .backgroundColor(Color.Transparent)
                 .stateEffect(false)
-                .zIndex(2)
+                .zIndex(addressInputLayerOrder().clearButton)
                 .onClick(() => this.clearAddressInput());
             }
-              .width('100%')
+              .width(addressInputLayerOrder().clearButtonContainerWidth)
               .height(ADDRESS_SEARCH_BAR_STYLE.height)
               .padding({ top: addressLockVerticalOffsetFor(
                 ADDRESS_SEARCH_BAR_STYLE.height,
                 32
               ) })
+              .margin({ left: 'calc(100% - 32vp)' })
               .hitTestBehavior(HitTestMode.Transparent)
-              .zIndex(2)
+              .zIndex(addressInputLayerOrder().clearButtonContainer)
           }
           if (this.inputMounted && this.editorActive) {
             TextInput({
@@ -462,6 +486,7 @@ export struct AddressSearchBar {
               : TextAlign.Center)
             .opacity(this.editorClosing ? this.editorCollapseProgress() : 1)
             .backgroundColor(Color.Transparent)
+            .zIndex(addressInputLayerOrder().editor)
             .padding({
               left: addressTextAlignmentFor(this.editorActive) === 'start'
                 ? addressInputLeftPaddingFor(this.isStartPage(), this.addressInputFocused)
