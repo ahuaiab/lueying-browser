@@ -6,7 +6,6 @@ import {
 } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { webview } from '@kit.ArkWeb';
-import fs from '@ohos.file.fs';
 import { BrowserTabRecord, lastValidUrlForTab, TabId } from '../model/BrowserTypes';
 import { shouldRetryWebHostAttachment } from '../model/BrowserInteraction';
 import { WebRuntimeFactory, WebRuntimeHandle } from './WebTabPool';
@@ -14,6 +13,17 @@ import { WebRuntimeFactory, WebRuntimeHandle } from './WebTabPool';
 const BROWSER_WEB_DOMAIN: number = 0x0000;
 const BROWSER_WEB_TAG: string = 'BrowserWeb';
 
+export interface WebDownloadHandler {
+  onBeforeDownload(tabId: TabId, item: webview.WebDownloadItem, isPrivate: boolean): void;
+  onDownloadUpdated(tabId: TabId, item: webview.WebDownloadItem): void;
+  onDownloadFinish(tabId: TabId, item: webview.WebDownloadItem): void;
+  onDownloadFailed(tabId: TabId, item: webview.WebDownloadItem): void;
+}
+
+/**
+ * Kept as a compatibility type until BrowserShell switches to DownloadService
+ * in Task 4. ArkWebRuntimeFactory no longer uses these callbacks.
+ */
 export interface WebDownloadObserver {
   onDownloadStart(tabId: TabId, fileName: string): void;
   onDownloadFinish(tabId: TabId, filePath: string): void;
@@ -30,9 +40,6 @@ export interface WebPageLifecycleObserver {
   onWindowNew(tabId: TabId, controller: webview.WebviewController): boolean;
   onFullScreenEnter(tabId: TabId, controller: webview.WebviewController): void;
   onFullScreenExit(tabId: TabId, controller: webview.WebviewController): void;
-  onDownloadStart(tabId: TabId, fileName: string): void;
-  onDownloadFinish(tabId: TabId, filePath: string): void;
-  onDownloadFailed(tabId: TabId): void;
 }
 
 export type WebRuntimeCreatedObserver = (tabId: TabId, url: string, runtimeId: string) => void;
@@ -252,15 +259,16 @@ export class ArkWebRuntimeHandle implements WebRuntimeHandle {
 export class ArkWebRuntimeFactory implements WebRuntimeFactory {
   private readonly uiContext: UIContext;
   private readonly observer: WebPageLifecycleObserver | undefined;
-  private readonly downloadRoot: string;
+  private readonly downloadHandler: WebDownloadHandler | undefined;
   private readonly runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined;
   private runtimeSequence: number = 0;
 
   constructor(uiContext: UIContext, observer: WebPageLifecycleObserver | undefined = undefined,
-    downloadRoot: string = '', runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined = undefined) {
+    downloadHandler: WebDownloadHandler | string | undefined = undefined,
+    runtimeCreatedObserver: WebRuntimeCreatedObserver | undefined = undefined) {
     this.uiContext = uiContext;
     this.observer = observer;
-    this.downloadRoot = downloadRoot;
+    this.downloadHandler = typeof downloadHandler === 'string' ? undefined : downloadHandler;
     this.runtimeCreatedObserver = runtimeCreatedObserver;
   }
 
@@ -297,7 +305,7 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
     const onFullScreenExit: () => void = () => {
       this.observer?.onFullScreenExit(tab.id, controller);
     };
-    const downloadDelegate: webview.WebDownloadDelegate | undefined = this.createDownloadDelegate(tab.id);
+    const downloadDelegate: webview.WebDownloadDelegate | undefined = this.createDownloadDelegate(tab.id, tab.isPrivate);
     builderNode.build(
       wrapBuilder<[WebBuildData]>(buildWebNode),
       new WebBuildData(sourceUrl, controller, tab.isPrivate, onPageEnd, onTitleReceive, onError, onSslError,
@@ -307,33 +315,22 @@ export class ArkWebRuntimeFactory implements WebRuntimeFactory {
     return new ArkWebRuntimeHandle(tab.id, runtimeId, controller, builderNode);
   }
 
-  private createDownloadDelegate(tabId: TabId): webview.WebDownloadDelegate | undefined {
-    if (this.downloadRoot.length === 0) {
-      return undefined;
-    }
-    try {
-      fs.mkdirSync(this.downloadRoot, true);
-    } catch (_error) {
+  private createDownloadDelegate(tabId: TabId, isPrivate: boolean): webview.WebDownloadDelegate | undefined {
+    if (this.downloadHandler === undefined) {
       return undefined;
     }
     const delegate: webview.WebDownloadDelegate = new webview.WebDownloadDelegate();
     delegate.onBeforeDownload((item: webview.WebDownloadItem) => {
-      const suggested: string = item.getSuggestedFileName();
-      const baseName: string = suggested.length > 0 ? suggested : `download-${Date.now()}`;
-      const safeName: string = baseName.replace(/[\\/:*?"<>|]/g, '_');
-      const targetPath: string = `${this.downloadRoot}/${Date.now()}-${safeName}`;
-      try {
-        item.start(targetPath);
-        this.observer?.onDownloadStart(tabId, safeName);
-      } catch (_error) {
-        this.observer?.onDownloadFailed(tabId);
-      }
+      this.downloadHandler?.onBeforeDownload(tabId, item, isPrivate);
+    });
+    delegate.onDownloadUpdated((item: webview.WebDownloadItem) => {
+      this.downloadHandler?.onDownloadUpdated(tabId, item);
     });
     delegate.onDownloadFinish((item: webview.WebDownloadItem) => {
-      this.observer?.onDownloadFinish(tabId, item.getFullPath());
+      this.downloadHandler?.onDownloadFinish(tabId, item);
     });
-    delegate.onDownloadFailed((_item: webview.WebDownloadItem) => {
-      this.observer?.onDownloadFailed(tabId);
+    delegate.onDownloadFailed((item: webview.WebDownloadItem) => {
+      this.downloadHandler?.onDownloadFailed(tabId, item);
     });
     return delegate;
   }

@@ -14,6 +14,7 @@ import safariTabTransitionTest from './ets/test/SafariTabTransition.test';
 import browserInteractionTest from './ets/test/BrowserInteraction.test';
 import tabOverviewTransitionTest from './ets/test/TabOverviewTransition.test';
 import downloadModelsTest from './ets/test/DownloadModels.test';
+import downloadServiceTest from './ets/test/DownloadService.test';
 
 export default function testsuite() {
   tabStoreTest();
@@ -32,4 +33,5 @@ export default function testsuite() {
   browserInteractionTest();
   tabOverviewTransitionTest();
   downloadModelsTest();
+  downloadServiceTest();
 }
