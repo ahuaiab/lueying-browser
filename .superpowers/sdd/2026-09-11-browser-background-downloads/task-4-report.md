@@ -101,3 +101,35 @@ The repair commit adds a service-level restore gate and serialized operation que
 
 - No device/emulator runtime validation was available in this round; notification permission and real request-agent background continuation remain end-to-end concerns.
 - Both compile gates retain the existing no-signing-config warning; the main build also reports existing system-capability/throw-handling warnings.
+
+## Review repair round: P1 RequestAgentGateway query failures
+
+Implementation commit: `45a421897f92c4613dea876fbf4a07d0f0c00c1a` (`fix-request-agent-query-failures`)
+
+The gateway now uses typed `AgentQueryError` failures with `UNAVAILABLE` and `NOT_FOUND` kinds. SDK error `21900006` is treated as a confirmed missing task and keeps the existing failure rule; other getTask/show/search IPC errors are propagated as unavailable. `DownloadService.restoreInternal` catches query failures at the restore boundary, preserves the persisted status, records a retryable local error, persists it, and publishes the snapshot. `handleFor` continues to catch non-restore query failures so UI actions do not create unhandled rejections.
+
+### Changed files
+
+- `app/entry/src/main/ets/browser/web/RequestAgentGateway.ets`
+- `app/entry/src/main/ets/browser/web/DownloadService.ets`
+- `app/entry/src/test/ets/test/DownloadAgentPorts.test.ets`
+- `app/entry/src/test/ets/test/DownloadService.test.ets`
+
+### TDD and verification
+
+- RED: the new `retains and publishes a persisted task when the gateway search IPC rejects` test failed with `expect failed equals running` before the gateway fix. The first green attempt also exposed ArkTS `10605087` `arkts-limited-throw` errors at `RequestAgentGateway.ets:259` and `:288`; raw caught errors were then converted to typed errors.
+- GREEN: final Local Test result is `Tests run: 21, Failure: 0, Error: 0, Pass: 21, Ignore: 0`.
+- `set DEVECO_HOME=C:\PROGRA~1\Huawei\DEVECO~1&&devecocli build --product default --modules entry --build-mode debug`
+  - `BUILD SUCCESSFUL in 14 s 317 ms`; 33 tasks, 27 executed, 6 up-to-date.
+- `set DEVECO_HOME=C:\PROGRA~1\Huawei\DEVECO~1&&devecocli build --product default --modules entry@ohosTest --build-mode debug`
+  - `BUILD SUCCESSFUL in 2 s 733 ms`; 35 tasks, 18 executed, 17 up-to-date.
+- `set DEVECO_HOME=C:\PROGRA~1\Huawei\DEVECO~1&&set DEVECO_SDK_HOME=C:\PROGRA~1\Huawei\DEVECO~1\sdk&&set PATH=C:\PROGRA~1\Huawei\DEVECO~1\tools\hvigor\bin;%PATH%&&python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\OneDrive\HarmonyOS\jianyue-browser\.superpowers\worktrees\browser-downloads\app --module entry --no-coverage --scope BrowserDownloadLifecycle,DownloadService,DownloadAgentPorts`
+  - Exit code 0; result file validated all 21 tests passed.
+  - Exact non-blocking warning: `Failed to parse build-profile.json5 for srcPath lookup: json5 is required because no 'module' parameter was provided ... Result file paths will fall back to <project_path>/<module_name>.`
+- `git diff --check` passed apart from Git's LF-to-CRLF working-copy notices.
+- `git diff -- README.md LICENSE` is empty; neither file was modified.
+
+### P1 concerns
+
+- No device/emulator runtime validation was available; real request-agent IPC behavior remains an end-to-end concern.
+- Existing no-signing-config and platform capability/throw-handling warnings remain non-blocking.
