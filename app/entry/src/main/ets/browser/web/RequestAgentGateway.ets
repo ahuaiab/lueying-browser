@@ -74,6 +74,8 @@ export interface AgentTaskHandle {
   onProgress(listener: (snapshot: AgentTaskSnapshot) => void): void;
   onCompleted(listener: (snapshot: AgentTaskSnapshot) => void): void;
   onFailed(listener: (snapshot: AgentTaskSnapshot) => void): void;
+  /** Remove callbacks owned by this service without cancelling the system task. */
+  detach?(): void;
   pause(): Promise<void>;
   resume(): Promise<void>;
   cancel(): Promise<void>;
@@ -102,6 +104,7 @@ export interface RequestAgentSystemConfig {
 export interface RequestAgentSystemTask {
   taskId: string;
   on(event: string, listener: (snapshot: AgentTaskSnapshot) => void): void;
+  off?(event: string): void;
   pause(): Promise<void>;
   resume(): Promise<void>;
   cancel(): Promise<void>;
@@ -139,6 +142,16 @@ class HarmonyRequestAgentTask implements RequestAgentSystemTask {
     } else if (event === 'failed') {
       this.task.on('failed', (progress: request.agent.Progress) =>
         listener(this.snapshot(progress, AgentTaskStatus.FAILED)));
+    }
+  }
+
+  off(event: string): void {
+    if (event === 'progress') {
+      this.task.off('progress');
+    } else if (event === 'completed') {
+      this.task.off('completed');
+    } else if (event === 'failed') {
+      this.task.off('failed');
     }
   }
 
@@ -263,6 +276,12 @@ class GatewayTaskHandle implements AgentTaskHandle {
     this.task.on('failed', listener);
   }
 
+  detach(): void {
+    this.task.off?.('progress');
+    this.task.off?.('completed');
+    this.task.off?.('failed');
+  }
+
   async pause(): Promise<void> {
     await this.task.pause();
   }
@@ -305,7 +324,12 @@ export class RequestAgentGateway implements AgentDownloadPort {
   }
 
   async searchByPrefix(prefix: string): Promise<AgentTaskSnapshot[]> {
-    const snapshots: AgentTaskSnapshot[] = await this.client.search();
+    let snapshots: AgentTaskSnapshot[] = [];
+    try {
+      snapshots = await this.client.search();
+    } catch (_error) {
+      return [];
+    }
     return snapshots.filter((snapshot: AgentTaskSnapshot): boolean =>
       (snapshot.description ?? '').startsWith(prefix)
     );

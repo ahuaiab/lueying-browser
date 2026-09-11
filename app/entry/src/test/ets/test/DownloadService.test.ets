@@ -1,7 +1,11 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { webview } from '@kit.ArkWeb';
 import { DownloadStore, DownloadRecordStorage } from '../../../main/ets/browser/data/DownloadStore';
-import { DownloadTaskRecord } from '../../../main/ets/browser/model/DownloadModels';
+import {
+  DownloadBackend,
+  DownloadStatus,
+  DownloadTaskRecord
+} from '../../../main/ets/browser/model/DownloadModels';
 import {
   AgentDownloadConfig,
   AgentDownloadPort,
@@ -15,7 +19,11 @@ import { WebDownloadHandler } from '../../../main/ets/browser/web/WebTabNode';
 
 class MemoryStorage implements DownloadRecordStorage {
   records: DownloadTaskRecord[] = [];
-  readonly events: string[] = [];
+  readonly events: string[];
+
+  constructor(eventSink: string[] | undefined = undefined) {
+    this.events = eventSink ?? [];
+  }
 
   async load(): Promise<DownloadTaskRecord[]> {
     return this.records;
@@ -24,6 +32,23 @@ class MemoryStorage implements DownloadRecordStorage {
   async save(records: DownloadTaskRecord[]): Promise<void> {
     this.records = records;
     this.events.push(`persist:${records[0]?.status ?? 'empty'}:${records[0]?.agentTaskId ?? ''}`);
+  }
+}
+
+class BlockingStorage extends MemoryStorage {
+  loadStarted: boolean = false;
+  private releaseCallback: (() => void) | undefined = undefined;
+
+  async load(): Promise<DownloadTaskRecord[]> {
+    this.loadStarted = true;
+    await new Promise<void>((resolve: () => void) => this.releaseCallback = resolve);
+    return this.records;
+  }
+
+  releaseLoad(): void {
+    const callback: (() => void) | undefined = this.releaseCallback;
+    this.releaseCallback = undefined;
+    callback?.();
   }
 }
 
@@ -64,6 +89,7 @@ class FakeAgent implements AgentDownloadPort {
   createCalls: number = 0;
   showCalls: number = 0;
   shouldFailCreate: boolean = false;
+  shouldFailSearch: boolean = false;
   recovered: AgentTaskHandle | undefined = undefined;
   showSnapshot: AgentTaskSnapshot | undefined = undefined;
 
@@ -85,6 +111,9 @@ class FakeAgent implements AgentDownloadPort {
   }
 
   async searchByPrefix(_prefix: string): Promise<AgentTaskSnapshot[]> {
+    if (this.shouldFailSearch) {
+      throw new Error('agent search unavailable');
+    }
     return [];
   }
 
@@ -128,6 +157,7 @@ class FakeItem {
   }
 
   getGuid(): string { return this.guid; }
+  getCurrentSpeed(): number { return 0; }
   getUrl(): string { return this.url; }
   getMethod(): string { return this.method; }
   getMimeType(): string { return 'application/zip'; }
@@ -135,6 +165,14 @@ class FakeItem {
   getReceivedBytes(): number { return 25; }
   getTotalBytes(): number { return 100; }
   getPercentComplete(): number { return 25; }
+  getState(): webview.WebDownloadState { return webview.WebDownloadState.IN_PROGRESS; }
+  getLastErrorCode(): webview.WebDownloadErrorCode { return webview.WebDownloadErrorCode.ERROR_UNKNOWN; }
+  pause(): void {}
+  resume(): void {}
+  getFullPath(): string { return ''; }
+  getOriginalUrl(): string { return this.url; }
+  getReferrerUrl(): string { return ''; }
+  serialize(): Uint8Array { return new Uint8Array(0); }
   start(path: string): void {
     this.starts.push(path);
     this.events.push('item.start');
@@ -151,19 +189,27 @@ class FakeItem {
   }
 }
 
+interface DownloadServiceTestSetup {
+  service: DownloadService;
+  storage: MemoryStorage;
+  agent: FakeAgent;
+  cookie: FakeCookiePort;
+}
+
 async function flush(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index: number = 0; index < 64; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 function itemAsWebDownloadItem(item: FakeItem): webview.WebDownloadItem {
-  return item as unknown as webview.WebDownloadItem;
+  return item as webview.WebDownloadItem;
 }
 
-function createService(events: string[], pathExists: ((path: string) => boolean) | undefined = undefined):
-  { service: DownloadService, storage: MemoryStorage, agent: FakeAgent, cookie: FakeCookiePort } {
-  const storage: MemoryStorage = new MemoryStorage();
+function createService(events: string[], pathExists: ((path: string) => boolean) | undefined = undefined,
+  storageOverride: MemoryStorage | undefined = undefined):
+  DownloadServiceTestSetup {
+  const storage: MemoryStorage = storageOverride ?? new MemoryStorage(events);
   const agent: FakeAgent = new FakeAgent(events);
   const cookie: FakeCookiePort = new FakeCookiePort();
   return {
@@ -177,6 +223,44 @@ function createService(events: string[], pathExists: ((path: string) => boolean)
 
 export default function downloadServiceTest() {
   describe('DownloadService', () => {
+    it('keeps a new ArkWeb download created during restore and persists it', 0, async () => {
+      const events: string[] = [];
+      const storage: BlockingStorage = new BlockingStorage();
+      const setup = createService(events, undefined, storage);
+      const restoring: Promise<void> = setup.service.restore();
+      await flush();
+      expect(storage.loadStarted).assertTrue();
+
+      const item: FakeItem = new FakeItem(events, 'blob:https://example.com/1');
+      setup.service.onBeforeDownload('tab-1', itemAsWebDownloadItem(item), false);
+      await flush();
+      storage.releaseLoad();
+      await restoring;
+      await flush();
+
+      expect(setup.service.snapshot().length).assertEqual(1);
+      expect(setup.service.snapshot()[0].id).assertEqual('web-guid-1');
+      expect(storage.records.length).assertEqual(1);
+    });
+
+    it('publishes persisted records when agent search rejects', 0, async () => {
+      const events: string[] = [];
+      const setup = createService(events);
+      setup.storage.records = [{
+        id: 'web-guid-1', agentTaskId: '', reconcileKey: 'web-guid-1', tabId: 'tab-1',
+        url: 'blob:https://example.com/1', filename: 'archive.zip', backend: DownloadBackend.ARKWEB,
+        status: DownloadStatus.RUNNING, receivedBytes: 4, totalBytes: 100, percent: 4,
+        createdAt: 1, updatedAt: 1, isPrivate: false
+      } as DownloadTaskRecord];
+      setup.agent.shouldFailSearch = true;
+
+      await setup.service.restore();
+
+      expect(setup.service.snapshot().length).assertEqual(1);
+      expect(setup.service.snapshot()[0].id).assertEqual('web-guid-1');
+      expect(setup.service.snapshot()[0].status).assertEqual(DownloadStatus.RUNNING);
+    });
+
     it('persists the agent handoff before cancelling ArkWeb', 0, async () => {
       const events: string[] = [];
       const setup = createService(events);
@@ -350,6 +434,7 @@ export default function downloadServiceTest() {
       expect(setup.service.snapshot()[0].id).assertEqual(id);
       setup.service.onDownloadFinish('tab-1', itemAsWebDownloadItem(item));
       setup.service.onDownloadFailed('tab-1', itemAsWebDownloadItem(item));
+      await flush();
 
       expect(setup.service.snapshot().length).assertEqual(1);
       expect(setup.service.snapshot()[0].id).assertEqual(id);

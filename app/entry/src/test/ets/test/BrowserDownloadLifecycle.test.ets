@@ -10,10 +10,14 @@ class FakeDownloadService implements BrowserDownloadServicePort {
   readonly events: string[] = [];
   readonly actionEvents: string[] = [];
   records: DownloadTaskRecord[] = [];
+  restoreShouldReject: boolean = false;
   private listener: ((tasks: DownloadTaskRecord[]) => void) | undefined = undefined;
 
   async restore(): Promise<void> {
     this.events.push('restore');
+    if (this.restoreShouldReject) {
+      throw new Error('restore query failed');
+    }
     this.listener?.(this.records);
   }
 
@@ -44,6 +48,17 @@ class FakeDownloadService implements BrowserDownloadServicePort {
   setListener(listener: (tasks: DownloadTaskRecord[]) => void): void {
     this.events.push('listener');
     this.listener = listener;
+  }
+
+  clearListener(listener: (tasks: DownloadTaskRecord[]) => void): void {
+    this.events.push('clear-listener');
+    if (this.listener === listener) {
+      this.listener = undefined;
+    }
+  }
+
+  emitSnapshot(): void {
+    this.listener?.(this.records);
   }
 }
 
@@ -118,6 +133,49 @@ export default function browserDownloadLifecycleTest() {
 
       expect(lifecycle.openDownloadManager(pageActionsReady)).assertTrue();
       expect(managerVisible).assertTrue();
+    });
+
+    it('detaches an old shell without clearing a rebound shell listener', 0, async () => {
+      const service: FakeDownloadService = new FakeDownloadService();
+      let oldUpdates: number = 0;
+      let newUpdates: number = 0;
+      const oldLifecycle: BrowserDownloadLifecycle = new BrowserDownloadLifecycle(
+        service,
+        (_tasks: DownloadTaskRecord[]) => oldUpdates += 1,
+        (_visible: boolean) => undefined
+      );
+      const newLifecycle: BrowserDownloadLifecycle = new BrowserDownloadLifecycle(
+        service,
+        (_tasks: DownloadTaskRecord[]) => newUpdates += 1,
+        (_visible: boolean) => undefined
+      );
+
+      await oldLifecycle.start();
+      await newLifecycle.start();
+      oldUpdates = 0;
+      newUpdates = 0;
+      oldLifecycle.stop();
+      service.emitSnapshot();
+
+      expect(oldUpdates).assertEqual(0);
+      expect(newUpdates).assertEqual(1);
+    });
+
+    it('publishes the service snapshot when restore rejects', 0, async () => {
+      const service: FakeDownloadService = new FakeDownloadService();
+      service.records = [liveTask()];
+      service.restoreShouldReject = true;
+      let published: DownloadTaskRecord[] = [];
+      const lifecycle: BrowserDownloadLifecycle = new BrowserDownloadLifecycle(
+        service,
+        (tasks: DownloadTaskRecord[]) => published = tasks,
+        (_visible: boolean) => undefined
+      );
+
+      await lifecycle.start();
+
+      expect(published.length).assertEqual(1);
+      expect(published[0].id).assertEqual('download-1');
     });
   });
 }

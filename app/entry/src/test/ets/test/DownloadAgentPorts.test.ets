@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import { Context } from '@kit.AbilityKit';
 import {
+  AgentDownloadConfig,
   AgentTaskSnapshot,
   AgentTaskStatus,
   canonicalAgentStatus,
@@ -92,29 +93,38 @@ export default function downloadAgentPortsTest() {
     it('creates a background private-path task and forwards progress callbacks', 0, async () => {
       const client: FakeRequestClient = new FakeRequestClient();
       const gateway: RequestAgentGateway = new RequestAgentGateway({} as Context, client);
-      const handle = await gateway.create({
+      const headers: Record<string, string> = {};
+      headers['Cookie'] = 'session=secret';
+      const config: AgentDownloadConfig = {
         reconcileKey: 'key-1',
         url: 'https://example.com/archive.zip',
         savePath: '/data/storage/el2/base/files/downloads/archive.zip',
         title: 'archive.zip',
         description: 'ignored-by-system-description',
-        headers: { Cookie: 'session=secret' },
+        headers,
         mimeType: 'application/zip',
         notificationEnabled: true
-      });
-      let progress: AgentTaskSnapshot | undefined = undefined;
-      let completed: AgentTaskSnapshot | undefined = undefined;
-      handle.onProgress((snapshot: AgentTaskSnapshot) => progress = snapshot);
-      handle.onCompleted((snapshot: AgentTaskSnapshot) => completed = snapshot);
-      client.task.emit('progress', { taskId: 'agent-1', status: AgentTaskStatus.RUNNING, receivedBytes: 4, totalBytes: 10, percent: 40 });
-      client.task.emit('completed', { taskId: 'agent-1', status: AgentTaskStatus.COMPLETED, receivedBytes: 10, totalBytes: 10, percent: 100 });
+      };
+      const handle = await gateway.create(config);
+      let progressPercent: number = -1;
+      let completedStatus: AgentTaskStatus = AgentTaskStatus.FAILED;
+      handle.onProgress((snapshot: AgentTaskSnapshot) => progressPercent = snapshot.percent);
+      handle.onCompleted((snapshot: AgentTaskSnapshot) => completedStatus = snapshot.status);
+      const progressSnapshot: AgentTaskSnapshot = {
+        taskId: 'agent-1', status: AgentTaskStatus.RUNNING, receivedBytes: 4, totalBytes: 10, percent: 40
+      };
+      const completedSnapshot: AgentTaskSnapshot = {
+        taskId: 'agent-1', status: AgentTaskStatus.COMPLETED, receivedBytes: 10, totalBytes: 10, percent: 100
+      };
+      client.task.emit('progress', progressSnapshot);
+      client.task.emit('completed', completedSnapshot);
 
       expect(client.createdConfig?.action).assertEqual('DOWNLOAD');
       expect(client.createdConfig?.mode).assertEqual('BACKGROUND');
       expect(client.createdConfig?.saveas.startsWith('/data/storage/el2/base/files/')).assertTrue();
       expect(client.createdConfig?.description).assertEqual('jianyue-download:key-1');
-      expect(progress?.percent).assertEqual(40);
-      expect(completed?.status).assertEqual(AgentTaskStatus.COMPLETED);
+      expect(progressPercent).assertEqual(40);
+      expect(completedStatus).assertEqual(AgentTaskStatus.COMPLETED);
       expect(JSON.stringify(await gateway.show('agent-1')).includes('session=secret')).assertFalse();
       expect((await gateway.searchByPrefix('jianyue-download:')).length).assertEqual(1);
     });

@@ -15,6 +15,7 @@ export class DownloadStore {
   private readonly storage: DownloadRecordStorage;
   private readonly now: () => number;
   private records: DownloadTaskRecord[] = [];
+  private persistenceTail: Promise<void> = Promise.resolve();
 
   constructor(storage: DownloadRecordStorage, now: () => number = () => Date.now()) {
     this.storage = storage;
@@ -22,9 +23,39 @@ export class DownloadStore {
   }
 
   async restore(): Promise<void> {
-    const recovered: DownloadTaskRecord[] = await this.storage.load();
+    let recovered: DownloadTaskRecord[] = [];
+    let loaded: boolean = true;
+    try {
+      recovered = await this.storage.load();
+    } catch (_error) {
+      loaded = false;
+    }
+    // A download can arrive while storage is suspended in load(). Preserve
+    // the live in-memory records before replacing the recovered view; the
+    // service-level restore gate also keeps this merge from racing begin().
+    const liveRecords: DownloadTaskRecord[] = this.records.map(
+      (task: DownloadTaskRecord): DownloadTaskRecord => this.copy(task)
+    );
     this.records = [];
     recovered.forEach((task: DownloadTaskRecord) => this.mergeRecovered(task, false));
+    liveRecords.forEach((task: DownloadTaskRecord) => {
+      const existing: DownloadTaskRecord | undefined = this.records.find(
+        (candidate: DownloadTaskRecord): boolean => candidate.id === task.id
+      );
+      if (existing === undefined) {
+        this.records.push(this.copy(task));
+      } else {
+        const index: number = this.records.indexOf(existing);
+        this.records[index] = this.copy(task);
+      }
+    });
+    if (liveRecords.length > 0 || (loaded && recovered.length > 0)) {
+      this.persist();
+    }
+  }
+
+  async flush(): Promise<void> {
+    await this.persistenceTail;
   }
 
   begin(task: DownloadTaskRecord): void {
@@ -139,7 +170,9 @@ export class DownloadStore {
   }
 
   private persist(): void {
-    this.storage.save(this.snapshot());
+    const snapshot: DownloadTaskRecord[] = this.snapshot();
+    const save: () => Promise<void> = (): Promise<void> => this.storage.save(snapshot);
+    this.persistenceTail = this.persistenceTail.then(save, save).catch((): void => undefined);
   }
 
   private copy(task: DownloadTaskRecord): DownloadTaskRecord {

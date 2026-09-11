@@ -39,6 +39,8 @@ export class DownloadService implements WebDownloadHandler {
   private readonly intentionalArkWebCancels: Set<string> = new Set();
   private uiLoaded: boolean = false;
   private idSequence: number = 0;
+  private operationTail: Promise<void> = Promise.resolve();
+  private restorePromise: Promise<void> | undefined = undefined;
 
   constructor(
     store: DownloadStore,
@@ -58,16 +60,30 @@ export class DownloadService implements WebDownloadHandler {
     this.pathExists = pathExists ?? ((path: string): boolean => this.fileExists(path));
   }
 
-  async restore(): Promise<void> {
+  restore(): Promise<void> {
+    if (this.restorePromise !== undefined) {
+      return this.restorePromise;
+    }
+    const operation: Promise<void> = this.enqueue(() => this.restoreInternal());
+    this.restorePromise = operation.then(
+      (): void => undefined,
+      (): void => this.notify()
+    ).catch((): void => undefined);
+    return this.restorePromise;
+  }
+
+  private async restoreInternal(): Promise<void> {
     await this.store.restore();
     const tasks: DownloadTaskRecord[] = this.store.snapshot();
     const recoveredHandles: Map<string, AgentTaskHandle> = new Map();
+    const queryFailures: Set<string> = new Set();
     for (const task of tasks) {
       if (task.backend === DownloadBackend.REQUEST_AGENT && task.agentTaskId.length > 0) {
         let handle: AgentTaskHandle | undefined = undefined;
         try {
           handle = await this.agent.getTask(task.agentTaskId);
         } catch (_error) {
+          queryFailures.add(task.id);
           handle = undefined;
         }
         if (handle !== undefined) {
@@ -77,6 +93,7 @@ export class DownloadService implements WebDownloadHandler {
         try {
           shown = await this.agent.show(task.agentTaskId);
         } catch (_error) {
+          queryFailures.add(task.id);
           shown = undefined;
         }
         if (shown !== undefined) {
@@ -85,7 +102,13 @@ export class DownloadService implements WebDownloadHandler {
       }
     }
 
-    const discovered: AgentTaskSnapshot[] = await this.agent.searchByPrefix('jianyue-download:');
+    let discovered: AgentTaskSnapshot[] = [];
+    let searchFailed: boolean = false;
+    try {
+      discovered = await this.agent.searchByPrefix('jianyue-download:');
+    } catch (_error) {
+      searchFailed = true;
+    }
     for (const snapshot of discovered) {
       const matching: DownloadTaskRecord | undefined = this.findRecoveredTask(snapshot);
       if (matching === undefined) {
@@ -101,6 +124,10 @@ export class DownloadService implements WebDownloadHandler {
       const handle: AgentTaskHandle | undefined = recoveredHandles.get(task.id);
       if (handle !== undefined) {
         this.attachAgentHandle(task.id, handle);
+      } else if (searchFailed || queryFailures.has(task.id)) {
+        this.store.patch(task.id, {
+          error: '后台下载状态查询失败；本地记录已保留。'
+        });
       } else {
         this.store.transition(task.id, DownloadStatus.FAILED, {
           error: '后台下载任务不可用；请重试。'
@@ -123,60 +150,93 @@ export class DownloadService implements WebDownloadHandler {
   }
 
   onBeforeDownload(tabId: TabId, item: webview.WebDownloadItem, isPrivate: boolean): void {
-    void this.begin(tabId, item, isPrivate);
+    const pending: Promise<void> = this.restore().then(
+      (): Promise<void> => this.enqueue(() => this.begin(tabId, item, isPrivate))
+    );
+    void pending.catch((): void => undefined);
   }
 
   onDownloadUpdated(_tabId: TabId, item: webview.WebDownloadItem): void {
     const id: string = this.itemId(item);
-    if (this.intentionalArkWebCancels.has(id)) {
-      return;
-    }
-    if (this.isTerminalTask(id)) {
-      return;
-    }
-    const receivedBytes: number = item.getReceivedBytes();
-    const totalBytes: number = item.getTotalBytes();
-    const percent: number = totalBytes > 0 ? percentForDownload(receivedBytes, totalBytes) : item.getPercentComplete();
-    this.store.patch(id, {
-      receivedBytes,
-      totalBytes,
-      percent: percent < 0 ? -1 : Math.min(100, Math.max(0, percent))
+    this.enqueueEvent((): void => {
+      if (this.intentionalArkWebCancels.has(id) || this.isTerminalTask(id)) {
+        return;
+      }
+      const receivedBytes: number = item.getReceivedBytes();
+      const totalBytes: number = item.getTotalBytes();
+      const percent: number = totalBytes > 0
+        ? percentForDownload(receivedBytes, totalBytes)
+        : item.getPercentComplete();
+      this.store.patch(id, {
+        receivedBytes,
+        totalBytes,
+        percent: percent < 0 ? -1 : Math.min(100, Math.max(0, percent))
+      });
+      this.notify();
     });
-    this.notify();
   }
 
   onDownloadFinish(_tabId: TabId, item: webview.WebDownloadItem): void {
     const id: string = this.itemId(item);
-    if (this.intentionalArkWebCancels.has(id)) {
-      return;
-    }
-    if (this.isTerminalTask(id)) {
-      return;
-    }
-    this.store.transition(id, DownloadStatus.COMPLETED, {
-      receivedBytes: item.getReceivedBytes(),
-      totalBytes: item.getTotalBytes(),
-      percent: 100
+    this.enqueueEvent((): void => {
+      if (this.intentionalArkWebCancels.has(id) || this.isTerminalTask(id)) {
+        return;
+      }
+      this.store.transition(id, DownloadStatus.COMPLETED, {
+        receivedBytes: item.getReceivedBytes(),
+        totalBytes: item.getTotalBytes(),
+        percent: 100
+      });
+      this.nativeItems.delete(id);
+      this.notify();
     });
-    this.nativeItems.delete(id);
-    this.notify();
   }
 
   onDownloadFailed(_tabId: TabId, item: webview.WebDownloadItem): void {
     const id: string = this.itemId(item);
-    if (this.intentionalArkWebCancels.has(id)) {
-      return;
-    }
-    if (this.isTerminalTask(id)) {
-      return;
-    }
-    this.store.transition(id, DownloadStatus.FAILED, {
-      error: '网页下载失败；请重试。'
+    this.enqueueEvent((): void => {
+      if (this.intentionalArkWebCancels.has(id) || this.isTerminalTask(id)) {
+        return;
+      }
+      this.store.transition(id, DownloadStatus.FAILED, {
+        error: '网页下载失败；请重试。'
+      });
+      this.notify();
     });
-    this.notify();
   }
 
   async pause(id: string): Promise<void> {
+    await this.restore();
+    await this.enqueue(() => this.pauseNow(id));
+  }
+
+  async resume(id: string): Promise<void> {
+    await this.restore();
+    await this.enqueue(() => this.resumeNow(id));
+  }
+
+  async cancel(id: string): Promise<void> {
+    await this.restore();
+    await this.enqueue(() => this.cancelNow(id));
+  }
+
+  async retry(id: string): Promise<void> {
+    await this.restore();
+    await this.enqueue(() => this.retryNow(id));
+  }
+
+  setListener(listener: (tasks: DownloadTaskRecord[]) => void): void {
+    this.listener = listener;
+    this.notify();
+  }
+
+  clearListener(listener: (tasks: DownloadTaskRecord[]) => void): void {
+    if (this.listener === listener) {
+      this.listener = undefined;
+    }
+  }
+
+  private async pauseNow(id: string): Promise<void> {
     const handle: AgentTaskHandle | undefined = await this.handleFor(id);
     if (handle === undefined) {
       return;
@@ -186,7 +246,7 @@ export class DownloadService implements WebDownloadHandler {
     this.notify();
   }
 
-  async resume(id: string): Promise<void> {
+  private async resumeNow(id: string): Promise<void> {
     const handle: AgentTaskHandle | undefined = await this.handleFor(id);
     if (handle === undefined) {
       return;
@@ -196,7 +256,7 @@ export class DownloadService implements WebDownloadHandler {
     this.notify();
   }
 
-  async cancel(id: string): Promise<void> {
+  private async cancelNow(id: string): Promise<void> {
     const handle: AgentTaskHandle | undefined = await this.handleFor(id);
     if (handle !== undefined) {
       await handle.cancel();
@@ -216,7 +276,7 @@ export class DownloadService implements WebDownloadHandler {
     this.notify();
   }
 
-  async retry(id: string): Promise<void> {
+  private async retryNow(id: string): Promise<void> {
     const task: DownloadTaskRecord | undefined = this.store.snapshot().find(
       (candidate: DownloadTaskRecord) => candidate.id === id
     );
@@ -248,11 +308,6 @@ export class DownloadService implements WebDownloadHandler {
     }
   }
 
-  setListener(listener: (tasks: DownloadTaskRecord[]) => void): void {
-    this.listener = listener;
-    this.notify();
-  }
-
   private async begin(tabId: TabId, item: webview.WebDownloadItem, isPrivate: boolean): Promise<void> {
     const id: string = this.itemId(item);
     if (this.store.snapshot().some((task: DownloadTaskRecord) => task.id === id)) {
@@ -281,6 +336,7 @@ export class DownloadService implements WebDownloadHandler {
       mimeType: item.getMimeType()
     };
     this.store.begin(task);
+    await this.store.flush();
     if (backend === DownloadBackend.ARKWEB) {
       this.startNative(task, item);
       return;
@@ -318,6 +374,7 @@ export class DownloadService implements WebDownloadHandler {
     }
 
     this.store.patch(task.id, { agentTaskId: handle.taskId });
+    await this.store.flush();
     this.attachAgentHandle(task.id, handle);
     if (item !== undefined) {
       this.intentionalArkWebCancels.add(task.id);
@@ -357,33 +414,68 @@ export class DownloadService implements WebDownloadHandler {
   }
 
   private attachAgentHandle(id: string, handle: AgentTaskHandle): void {
+    this.detachAgentHandle(id);
     this.handles.set(id, handle);
     handle.onProgress((snapshot: AgentTaskSnapshot) => {
-      this.store.updateProgress(id, snapshot.receivedBytes, snapshot.totalBytes);
-      this.notify();
+      this.enqueueAgentEvent(id, handle, (): void => {
+        this.store.updateProgress(id, snapshot.receivedBytes, snapshot.totalBytes);
+        this.notify();
+      });
     });
     handle.onCompleted((snapshot: AgentTaskSnapshot) => {
-      if (this.isTerminalTask(id)) {
-        return;
-      }
-      this.store.transition(id, DownloadStatus.COMPLETED, {
-        receivedBytes: snapshot.receivedBytes,
-        totalBytes: snapshot.totalBytes,
-        percent: 100
+      this.enqueueAgentEvent(id, handle, (): void => {
+        if (this.isTerminalTask(id)) {
+          return;
+        }
+        this.store.transition(id, DownloadStatus.COMPLETED, {
+          receivedBytes: snapshot.receivedBytes,
+          totalBytes: snapshot.totalBytes,
+          percent: 100
+        });
+        this.intentionalArkWebCancels.delete(id);
+        this.detachAgentHandle(id);
+        this.notify();
       });
-      this.intentionalArkWebCancels.delete(id);
-      this.notify();
     });
     handle.onFailed((snapshot: AgentTaskSnapshot) => {
-      if (this.isTerminalTask(id)) {
-        return;
-      }
-      this.store.transition(id, DownloadStatus.FAILED, {
-        error: snapshot.error ?? '后台下载失败；请重试。'
+      this.enqueueAgentEvent(id, handle, (): void => {
+        if (this.isTerminalTask(id)) {
+          return;
+        }
+        this.store.transition(id, DownloadStatus.FAILED, {
+          error: snapshot.error ?? '后台下载失败；请重试。'
+        });
+        this.intentionalArkWebCancels.delete(id);
+        this.detachAgentHandle(id);
+        this.notify();
       });
-      this.intentionalArkWebCancels.delete(id);
-      this.notify();
     });
+  }
+
+  private detachAgentHandle(id: string): void {
+    const handle: AgentTaskHandle | undefined = this.handles.get(id);
+    if (handle === undefined) {
+      return;
+    }
+    this.handles.delete(id);
+    try {
+      handle.detach?.();
+    } catch (_error) {
+      // Detaching callbacks is best effort; the system task continues in the
+      // background and identity checks ignore any late callback.
+    }
+  }
+
+  private enqueueAgentEvent(id: string, handle: AgentTaskHandle, operation: () => void): void {
+    const pending: Promise<void> = this.restore().then(
+      (): Promise<void> => this.enqueue(async (): Promise<void> => {
+        if (this.handles.get(id) !== handle) {
+          return;
+        }
+        operation();
+      })
+    );
+    void pending.catch((): void => undefined);
   }
 
   private findRecoveredTask(snapshot: AgentTaskSnapshot): DownloadTaskRecord | undefined {
@@ -437,7 +529,12 @@ export class DownloadService implements WebDownloadHandler {
     if (task === undefined || task.agentTaskId.length === 0) {
       return undefined;
     }
-    const recovered: AgentTaskHandle | undefined = await this.agent.getTask(task.agentTaskId);
+    let recovered: AgentTaskHandle | undefined = undefined;
+    try {
+      recovered = await this.agent.getTask(task.agentTaskId);
+    } catch (_error) {
+      recovered = undefined;
+    }
     if (recovered !== undefined) {
       this.attachAgentHandle(id, recovered);
     }
@@ -533,7 +630,28 @@ export class DownloadService implements WebDownloadHandler {
     };
   }
 
+  private enqueueEvent(operation: () => void): void {
+    const pending: Promise<void> = this.restore().then(
+      (): Promise<void> => this.enqueue(async (): Promise<void> => operation())
+    );
+    void pending.catch((): void => undefined);
+  }
+
+  private enqueue(operation: () => Promise<void>): Promise<void> {
+    const next: Promise<void> = this.operationTail.then(operation, operation);
+    this.operationTail = next.then((): void => undefined, (): void => undefined);
+    return next;
+  }
+
   private notify(): void {
-    this.listener?.(this.store.snapshot());
+    const listener: ((tasks: DownloadTaskRecord[]) => void) | undefined = this.listener;
+    if (listener === undefined) {
+      return;
+    }
+    try {
+      listener(this.store.snapshot());
+    } catch (_error) {
+      // A shell can be tearing down while a background callback is delivered.
+    }
   }
 }

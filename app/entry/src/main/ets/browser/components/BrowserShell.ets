@@ -171,6 +171,8 @@ const BROWSER_WEB_DOMAIN: number = 0x0000;
 const BROWSER_WEB_TAG: string = 'BrowserWeb';
 const TAB_SNAPSHOT_RETRY_DELAYS_MS: number[] = [120, 280, 640];
 const DOWNLOAD_RECORDS_KEY: string = 'downloads.v1';
+let sharedDownloadService: DownloadService | undefined = undefined;
+let sharedDownloadFilesDir: string = '';
 
 class KeyValueDownloadRecordStorage implements DownloadRecordStorage {
   private readonly store: KeyValueStore;
@@ -217,6 +219,7 @@ export interface BrowserDownloadServicePort {
   cancel(id: string): Promise<void>;
   retry(id: string): Promise<void>;
   setListener(listener: (tasks: DownloadTaskRecord[]) => void): void;
+  clearListener(listener: (tasks: DownloadTaskRecord[]) => void): void;
 }
 
 class DownloadServiceLifecyclePort implements BrowserDownloadServicePort {
@@ -257,6 +260,10 @@ class DownloadServiceLifecyclePort implements BrowserDownloadServicePort {
   setListener(listener: (tasks: DownloadTaskRecord[]) => void): void {
     this.service.setListener(listener);
   }
+
+  clearListener(listener: (tasks: DownloadTaskRecord[]) => void): void {
+    this.service.clearListener(listener);
+  }
 }
 
 /** Keeps shell visibility separate from request.agent task ownership. */
@@ -264,6 +271,8 @@ export class BrowserDownloadLifecycle {
   private readonly service: BrowserDownloadServicePort;
   private readonly snapshotListener: (tasks: DownloadTaskRecord[]) => void;
   private readonly managerVisibilityListener: (visible: boolean) => void;
+  private boundListener: ((tasks: DownloadTaskRecord[]) => void) | undefined = undefined;
+  private stopped: boolean = false;
 
   constructor(
     service: BrowserDownloadServicePort,
@@ -276,11 +285,32 @@ export class BrowserDownloadLifecycle {
   }
 
   async start(): Promise<void> {
-    this.service.setListener((tasks: DownloadTaskRecord[]): void => {
-      this.snapshotListener(tasks.slice());
-    });
+    this.stopped = false;
+    if (this.boundListener === undefined) {
+      this.boundListener = (tasks: DownloadTaskRecord[]): void => {
+        this.snapshotListener(tasks.slice());
+      };
+    }
+    this.service.setListener(this.boundListener);
     this.service.markUiLoaded();
-    await this.service.restore();
+    try {
+      await this.service.restore();
+    } catch (_error) {
+      // The service must expose its loaded snapshot even if system task
+      // recovery fails; this also keeps void start() rejection-free.
+      if (!this.stopped) {
+        this.snapshotListener(this.service.snapshot().slice());
+      }
+    }
+  }
+
+  stop(): void {
+    this.stopped = true;
+    const listener: ((tasks: DownloadTaskRecord[]) => void) | undefined = this.boundListener;
+    if (listener !== undefined) {
+      this.service.clearListener(listener);
+      this.boundListener = undefined;
+    }
   }
 
   onHidden(): void {
@@ -958,16 +988,21 @@ export struct BrowserShell {
       : new PreferencesKeyValueStore(hostContext);
     this.repository = new BrowserRepository(keyValueStore);
     if (hostContext !== undefined) {
-      const downloadStore: DownloadStore = new DownloadStore(
-        new KeyValueDownloadRecordStorage(keyValueStore)
-      );
-      const downloadService: DownloadService = new DownloadService(
-        downloadStore,
-        new RequestAgentGateway(hostContext),
-        new DownloadNotificationGateway(hostContext),
-        new ArkWebCookiePort(),
-        hostContext.filesDir
-      );
+      const existingDownloadService: DownloadService | undefined = sharedDownloadService;
+      const downloadService: DownloadService = existingDownloadService === undefined ||
+        sharedDownloadFilesDir !== hostContext.filesDir
+        ? new DownloadService(
+          new DownloadStore(new KeyValueDownloadRecordStorage(keyValueStore)),
+          new RequestAgentGateway(hostContext),
+          new DownloadNotificationGateway(hostContext),
+          new ArkWebCookiePort(),
+          hostContext.filesDir
+        )
+        : existingDownloadService;
+      if (downloadService !== existingDownloadService) {
+        sharedDownloadService = downloadService;
+        sharedDownloadFilesDir = hostContext.filesDir;
+      }
       this.downloadService = downloadService;
       this.downloadLifecycle = new BrowserDownloadLifecycle(
         new DownloadServiceLifecyclePort(downloadService),
@@ -1034,6 +1069,8 @@ export struct BrowserShell {
     this.avoidAreaListener = undefined;
     this.windowSizeChangeListener = undefined;
     this.mainWindow = undefined;
+    this.downloadLifecycle?.stop();
+    this.downloadLifecycle = undefined;
     if (this.lifecyclePort !== undefined) {
       BrowserLifecycleRegistry.clear(this.lifecyclePort);
       this.lifecyclePort = undefined;
