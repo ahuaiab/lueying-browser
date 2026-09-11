@@ -11,6 +11,7 @@ import {
 import { TabId } from '../model/BrowserTypes';
 import { NotificationPermissionPort } from './DownloadNotificationGateway';
 import {
+  AgentDownloadConfig,
   AgentDownloadPort,
   AgentTaskHandle,
   AgentTaskSnapshot,
@@ -226,7 +227,10 @@ export class DownloadService implements WebDownloadHandler {
     if (task.backend === DownloadBackend.ARKWEB && item !== undefined) {
       const savePath: string = this.pathFor(task.filename, task.id);
       this.store.transition(id, DownloadStatus.QUEUED, { savePath, error: '' });
-      this.startNative({ ...task, savePath, status: DownloadStatus.QUEUED }, item);
+      const retryTask: DownloadTaskRecord = this.copyTask(task);
+      retryTask.savePath = savePath;
+      retryTask.status = DownloadStatus.QUEUED;
+      this.startNative(retryTask, item);
       return;
     }
     if (task.backend === DownloadBackend.REQUEST_AGENT && !task.isPrivate) {
@@ -236,7 +240,11 @@ export class DownloadService implements WebDownloadHandler {
         savePath,
         error: ''
       });
-      await this.createAgentTask({ ...task, agentTaskId: '', savePath, status: DownloadStatus.HANDOFF_PENDING }, undefined);
+      const retryTask: DownloadTaskRecord = this.copyTask(task);
+      retryTask.agentTaskId = '';
+      retryTask.savePath = savePath;
+      retryTask.status = DownloadStatus.HANDOFF_PENDING;
+      await this.createAgentTask(retryTask, undefined);
     }
   }
 
@@ -284,16 +292,21 @@ export class DownloadService implements WebDownloadHandler {
     let handle: AgentTaskHandle;
     try {
       const cookie: string = await this.cookie.fetchCookie(task.url, task.isPrivate);
-      handle = await this.agent.create({
+      const headers: Record<string, string> = {};
+      if (cookie.length > 0) {
+        headers['Cookie'] = cookie;
+      }
+      const config: AgentDownloadConfig = {
         reconcileKey: task.reconcileKey,
         url: task.url,
         savePath: task.savePath ?? this.pathFor(task.filename, task.id),
         title: task.filename,
         description: 'jianyue-download:' + task.reconcileKey,
-        headers: cookie.length === 0 ? {} : { Cookie: cookie },
+        headers,
         mimeType: task.mimeType ?? '',
         notificationEnabled: this.uiLoaded
-      });
+      };
+      handle = await this.agent.create(config);
     } catch (_error) {
       if (item === undefined) {
         this.store.transition(task.id, DownloadStatus.FAILED, { error: '后台下载创建失败；请重试。' });
@@ -383,16 +396,14 @@ export class DownloadService implements WebDownloadHandler {
 
   private mergeAgentSnapshot(task: DownloadTaskRecord, snapshot: AgentTaskSnapshot): void {
     const status: DownloadStatus = this.statusFor(snapshot.status);
-    const merged: DownloadTaskRecord = {
-      ...task,
-      agentTaskId: snapshot.taskId,
-      status,
-      receivedBytes: snapshot.receivedBytes,
-      totalBytes: snapshot.totalBytes,
-      percent: snapshot.percent,
-      updatedAt: this.now(),
-      error: snapshot.error
-    };
+    const merged: DownloadTaskRecord = this.copyTask(task);
+    merged.agentTaskId = snapshot.taskId;
+    merged.status = status;
+    merged.receivedBytes = snapshot.receivedBytes;
+    merged.totalBytes = snapshot.totalBytes;
+    merged.percent = snapshot.percent;
+    merged.updatedAt = this.now();
+    merged.error = snapshot.error;
     if (snapshot.savePath !== undefined) {
       merged.savePath = snapshot.savePath;
     }
@@ -498,6 +509,28 @@ export class DownloadService implements WebDownloadHandler {
       (candidate: DownloadTaskRecord) => candidate.id === id
     );
     return task !== undefined && this.isTerminal(task.status);
+  }
+
+  private copyTask(task: DownloadTaskRecord): DownloadTaskRecord {
+    return {
+      id: task.id,
+      agentTaskId: task.agentTaskId,
+      reconcileKey: task.reconcileKey,
+      tabId: task.tabId,
+      url: task.url,
+      filename: task.filename,
+      backend: task.backend,
+      status: task.status,
+      receivedBytes: task.receivedBytes,
+      totalBytes: task.totalBytes,
+      percent: task.percent,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      isPrivate: task.isPrivate,
+      savePath: task.savePath,
+      mimeType: task.mimeType,
+      error: task.error
+    };
   }
 
   private notify(): void {

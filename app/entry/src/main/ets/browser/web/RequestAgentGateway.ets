@@ -202,15 +202,20 @@ class HarmonyRequestAgentClient implements RequestAgentClient {
   }
 
   async search(): Promise<AgentTaskSnapshot[]> {
-    const tasks: Array<string | request.agent.TaskInfo> = await request.agent.search({
+    const taskIds: string[] = await request.agent.search({
       action: request.agent.Action.DOWNLOAD,
       mode: request.agent.Mode.BACKGROUND
     });
-    const snapshots: Array<AgentTaskSnapshot | undefined> = await Promise.all(tasks.map(
-      (task: string | request.agent.TaskInfo): Promise<AgentTaskSnapshot | undefined> =>
-        typeof task === 'string' ? this.show(task) : Promise.resolve(this.snapshotForTaskInfo(task))
+    const snapshots: Array<AgentTaskSnapshot | undefined> = await Promise.all(taskIds.map(
+      (taskId: string): Promise<AgentTaskSnapshot | undefined> => this.show(taskId)
     ));
-    return snapshots.filter((snapshot: AgentTaskSnapshot | undefined): snapshot is AgentTaskSnapshot => snapshot !== undefined);
+    const available: AgentTaskSnapshot[] = [];
+    for (const snapshot of snapshots) {
+      if (snapshot !== undefined) {
+        available.push(snapshot);
+      }
+    }
+    return available;
   }
 
   async show(taskId: string): Promise<AgentTaskSnapshot | undefined> {

@@ -35,8 +35,14 @@ import {
 import { WebTabPool } from '../web/WebTabPool';
 import { MemorySnapshotStorage, TabSnapshotCache } from '../snapshot/TabSnapshotCache';
 import { BrowserRepository } from '../data/BrowserRepository';
+import { DownloadRecordStorage, DownloadStore } from '../data/DownloadStore';
 import { KeyValueStore, MemoryKeyValueStore, PreferencesKeyValueStore } from '../data/KeyValueStore';
 import { BrowserLifecyclePort, BrowserLifecycleRegistry } from '../lifecycle/BrowserLifecyclePort';
+import {
+  DownloadProgressSnapshot,
+  DownloadStatus,
+  DownloadTaskRecord
+} from '../model/DownloadModels';
 import { PageAction, desktopUserAgentFor } from '../model/PageActions';
 import {
   HistoryDeleteRange,
@@ -153,6 +159,9 @@ import {
   bookmarkRecordForPage
 } from '../model/BrowserTypes';
 import { TabStore } from '../store/TabStore';
+import { DownloadNotificationGateway } from '../web/DownloadNotificationGateway';
+import { DownloadService, WebCookiePort } from '../web/DownloadService';
+import { RequestAgentGateway } from '../web/RequestAgentGateway';
 import {
   takePendingExternalUrl
 } from '../model/BrowserLaunchState';
@@ -161,6 +170,149 @@ const ENABLE_GESTURE_LAB: boolean = false;
 const BROWSER_WEB_DOMAIN: number = 0x0000;
 const BROWSER_WEB_TAG: string = 'BrowserWeb';
 const TAB_SNAPSHOT_RETRY_DELAYS_MS: number[] = [120, 280, 640];
+const DOWNLOAD_RECORDS_KEY: string = 'downloads.v1';
+
+class KeyValueDownloadRecordStorage implements DownloadRecordStorage {
+  private readonly store: KeyValueStore;
+
+  constructor(store: KeyValueStore) {
+    this.store = store;
+  }
+
+  async load(): Promise<DownloadTaskRecord[]> {
+    const raw: string = await this.store.getString(DOWNLOAD_RECORDS_KEY, '[]');
+    try {
+      const records: DownloadTaskRecord[] = JSON.parse(raw) as DownloadTaskRecord[];
+      return Array.isArray(records) ? records : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  async save(records: DownloadTaskRecord[]): Promise<void> {
+    await this.store.putString(DOWNLOAD_RECORDS_KEY, JSON.stringify(records));
+    await this.store.flush();
+  }
+}
+
+class ArkWebCookiePort implements WebCookiePort {
+  async fetchCookie(url: string, isPrivate: boolean): Promise<string> {
+    if (isPrivate) {
+      return '';
+    }
+    try {
+      return await webview.WebCookieManager.fetchCookie(url, false, false);
+    } catch (_error) {
+      return '';
+    }
+  }
+}
+
+export interface BrowserDownloadServicePort {
+  restore(): Promise<void>;
+  markUiLoaded(): void;
+  snapshot(): DownloadTaskRecord[];
+  pause(id: string): Promise<void>;
+  resume(id: string): Promise<void>;
+  cancel(id: string): Promise<void>;
+  retry(id: string): Promise<void>;
+  setListener(listener: (tasks: DownloadTaskRecord[]) => void): void;
+}
+
+class DownloadServiceLifecyclePort implements BrowserDownloadServicePort {
+  private readonly service: DownloadService;
+
+  constructor(service: DownloadService) {
+    this.service = service;
+  }
+
+  async restore(): Promise<void> {
+    await this.service.restore();
+  }
+
+  markUiLoaded(): void {
+    this.service.markUiLoaded();
+  }
+
+  snapshot(): DownloadTaskRecord[] {
+    return this.service.snapshot();
+  }
+
+  async pause(id: string): Promise<void> {
+    await this.service.pause(id);
+  }
+
+  async resume(id: string): Promise<void> {
+    await this.service.resume(id);
+  }
+
+  async cancel(id: string): Promise<void> {
+    await this.service.cancel(id);
+  }
+
+  async retry(id: string): Promise<void> {
+    await this.service.retry(id);
+  }
+
+  setListener(listener: (tasks: DownloadTaskRecord[]) => void): void {
+    this.service.setListener(listener);
+  }
+}
+
+/** Keeps shell visibility separate from request.agent task ownership. */
+export class BrowserDownloadLifecycle {
+  private readonly service: BrowserDownloadServicePort;
+  private readonly snapshotListener: (tasks: DownloadTaskRecord[]) => void;
+  private readonly managerVisibilityListener: (visible: boolean) => void;
+
+  constructor(
+    service: BrowserDownloadServicePort,
+    snapshotListener: (tasks: DownloadTaskRecord[]) => void,
+    managerVisibilityListener: (visible: boolean) => void
+  ) {
+    this.service = service;
+    this.snapshotListener = snapshotListener;
+    this.managerVisibilityListener = managerVisibilityListener;
+  }
+
+  async start(): Promise<void> {
+    this.service.setListener((tasks: DownloadTaskRecord[]): void => {
+      this.snapshotListener(tasks.slice());
+    });
+    this.service.markUiLoaded();
+    await this.service.restore();
+  }
+
+  onHidden(): void {
+    // request.agent owns live background tasks; shell visibility must not
+    // pause or cancel them.
+  }
+
+  openDownloadManager(_pageActionsReady: boolean = false): boolean {
+    this.managerVisibilityListener(true);
+    return true;
+  }
+
+  closeDownloadManager(): void {
+    this.managerVisibilityListener(false);
+  }
+
+  async pause(id: string): Promise<void> {
+    await this.service.pause(id);
+  }
+
+  async resume(id: string): Promise<void> {
+    await this.service.resume(id);
+  }
+
+  async cancel(id: string): Promise<void> {
+    await this.service.cancel(id);
+  }
+
+  async retry(id: string): Promise<void> {
+    await this.service.retry(id);
+  }
+}
 
 /** Adapts the stable ArkWeb runtime registry to the serial browser command port. */
 class ArkWebTabRuntimePort implements TabRuntimePort {
@@ -490,6 +642,8 @@ export struct BrowserShell {
   @Local pageReady: boolean = false;
   @Local showLibrary: boolean = false;
   @Local showStartPageCustomize: boolean = false;
+  @Local downloadTasks: DownloadTaskRecord[] = [];
+  @Local showDownloadManager: boolean = false;
   @Local startPageCustomizeDismissProgress: number = 0;
   private startPageCustomizeDismissRequested: boolean = false;
   @Local pageSnapshot: image.PixelMap | undefined = undefined;
@@ -566,6 +720,8 @@ export struct BrowserShell {
   private readonly canNavigateForwardByTab: Map<TabId, boolean> = new Map();
   private readonly errorStatesByTab: Map<TabId, BrowserErrorState | undefined> = new Map();
   private repository: BrowserRepository | undefined = undefined;
+  private downloadService: DownloadService | undefined = undefined;
+  private downloadLifecycle: BrowserDownloadLifecycle | undefined = undefined;
   private lifecyclePort: BrowserLifecyclePort | undefined = undefined;
   private webTabPool: WebTabPool | undefined = undefined;
   private runtimePort: ArkWebTabRuntimePort | undefined = undefined;
@@ -604,7 +760,6 @@ export struct BrowserShell {
     const uiContext: UIContext = this.getUIContext();
     this.observeTopAvoidArea(uiContext);
     const hostContext = uiContext.getHostContext();
-    const downloadRoot: string = hostContext === undefined ? '' : `${hostContext.filesDir}/downloads`;
     const pageLifecycleObserver: WebPageLifecycleObserver = new BrowserPageLifecycleObserver(
       (tabId: TabId, controller: webview.WebviewController) => {
         this.applyUserAgentMode(tabId, controller, false);
@@ -802,10 +957,38 @@ export struct BrowserShell {
       ? new MemoryKeyValueStore()
       : new PreferencesKeyValueStore(hostContext);
     this.repository = new BrowserRepository(keyValueStore);
+    if (hostContext !== undefined) {
+      const downloadStore: DownloadStore = new DownloadStore(
+        new KeyValueDownloadRecordStorage(keyValueStore)
+      );
+      const downloadService: DownloadService = new DownloadService(
+        downloadStore,
+        new RequestAgentGateway(hostContext),
+        new DownloadNotificationGateway(hostContext),
+        new ArkWebCookiePort(),
+        hostContext.filesDir
+      );
+      this.downloadService = downloadService;
+      this.downloadLifecycle = new BrowserDownloadLifecycle(
+        new DownloadServiceLifecyclePort(downloadService),
+        (tasks: DownloadTaskRecord[]): void => {
+          this.downloadTasks = tasks.slice();
+        },
+        (visible: boolean): void => {
+          this.showDownloadManager = visible;
+        }
+      );
+      void this.downloadLifecycle.start();
+    } else {
+      this.downloadService = undefined;
+      this.downloadLifecycle = undefined;
+      this.downloadTasks = [];
+      this.showDownloadManager = false;
+    }
     this.webTabPool = new WebTabPool(new ArkWebRuntimeFactory(
       uiContext,
       pageLifecycleObserver,
-      downloadRoot,
+      this.downloadService,
       (tabId: TabId, url: string, runtimeId: string) =>
         this.logLoadUrl(
           url,
@@ -955,6 +1138,69 @@ export struct BrowserShell {
       return false;
     }
     return this.pageReady || this.runtimePort?.controllerFor(tab.id) !== undefined;
+  }
+
+  private downloadProgressForTab(tabId: TabId): DownloadProgressSnapshot | undefined {
+    const active: DownloadTaskRecord[] = this.downloadTasks.filter((task: DownloadTaskRecord): boolean =>
+      task.tabId === tabId && task.status !== DownloadStatus.COMPLETED &&
+      task.status !== DownloadStatus.FAILED && task.status !== DownloadStatus.CANCELLED
+    );
+    if (active.length === 0) {
+      return undefined;
+    }
+    const newest: DownloadTaskRecord = active.reduce(
+      (current: DownloadTaskRecord, task: DownloadTaskRecord): DownloadTaskRecord =>
+        task.updatedAt > current.updatedAt ? task : current
+    );
+    return {
+      id: newest.id,
+      tabId: newest.tabId,
+      status: newest.status,
+      receivedBytes: newest.receivedBytes,
+      totalBytes: newest.totalBytes,
+      percent: newest.percent,
+      filename: newest.filename,
+      url: newest.url
+    };
+  }
+
+  private openDownloadManager(): void {
+    this.showLibrary = false;
+    if (this.showStartPageCustomize) {
+      this.closeStartPageCustomize();
+    }
+    if (this.addressEditing) {
+      this.closeAddressEditor();
+    }
+    if (this.downloadLifecycle === undefined) {
+      this.showDownloadManager = true;
+      return;
+    }
+    this.downloadLifecycle.openDownloadManager(this.pageActionsReady());
+  }
+
+  private closeDownloadManager(): void {
+    if (this.downloadLifecycle === undefined) {
+      this.showDownloadManager = false;
+      return;
+    }
+    this.downloadLifecycle.closeDownloadManager();
+  }
+
+  private pauseDownload(id: string): void {
+    void this.downloadLifecycle?.pause(id);
+  }
+
+  private resumeDownload(id: string): void {
+    void this.downloadLifecycle?.resume(id);
+  }
+
+  private cancelDownload(id: string): void {
+    void this.downloadLifecycle?.cancel(id);
+  }
+
+  private retryDownload(id: string): void {
+    void this.downloadLifecycle?.retry(id);
   }
 
   private activeAddress(): string {
@@ -1273,6 +1519,7 @@ export struct BrowserShell {
   /** Start the in-place editor in the address slot of the floating TabBar. */
   private openAddressEditor(): void {
     if (this.overviewProgress !== 0 || this.showLibrary || this.showStartPageCustomize ||
+      this.showDownloadManager ||
       this.pageDisplayState.fullScreen || this.gestureActive ||
       this.addressHandoffProgress < 1) {
       return;
@@ -1941,6 +2188,7 @@ export struct BrowserShell {
     }
     this.showLibrary = false;
     this.showStartPageCustomize = false;
+    this.closeDownloadManager();
     if (this.addressEditing) {
       this.closeAddressEditor();
     }
@@ -1955,6 +2203,7 @@ export struct BrowserShell {
    * is reactivated by handleForeground().
    */
   private async handleBackground(): Promise<void> {
+    this.downloadLifecycle?.onHidden();
     const controller: webview.WebviewController | undefined =
       this.runtimePort?.controllerFor(this.tabStore.activeTabId);
     if (controller !== undefined) {
@@ -2803,6 +3052,7 @@ export struct BrowserShell {
     this.startPageCustomizeDismissRequested = false;
     this.showStartPageCustomize = true;
     this.showLibrary = false;
+    this.closeDownloadManager();
   }
 
   private beginStartPageCustomizeDismissAnimation(): void {
@@ -2886,6 +3136,7 @@ export struct BrowserShell {
   }
 
   private async openLibrary(): Promise<void> {
+    this.closeDownloadManager();
     const repository: BrowserRepository | undefined = this.repository;
     if (repository !== undefined) {
       this.historyItems = await repository.listHistory();
@@ -2939,6 +3190,7 @@ export struct BrowserShell {
   private openLibraryEntry(url: string): void {
     this.showLibrary = false;
     this.showStartPageCustomize = false;
+    this.closeDownloadManager();
     this.loadAddress(url, 'library-entry', 'openLibraryEntry');
   }
 
@@ -3212,11 +3464,16 @@ export struct BrowserShell {
     hilog.info(
       BROWSER_WEB_DOMAIN,
       BROWSER_WEB_TAG,
-      'event=system_back overview=%{public}d library=%{public}s pageBack=%{public}s',
+      'event=system_back overview=%{public}d library=%{public}s downloads=%{public}s pageBack=%{public}s',
       this.overviewProgress,
       this.showLibrary ? 'true' : 'false',
+      this.showDownloadManager ? 'true' : 'false',
       this.canNavigateBack ? 'true' : 'false'
     );
+    if (this.showDownloadManager) {
+      this.closeDownloadManager();
+      return true;
+    }
     if (this.barMode !== 'collapsed' || this.inputExpandProgress > 0) {
       this.closeAddressEditor();
       return true;
@@ -4306,7 +4563,7 @@ export struct BrowserShell {
         rawDragX: this.rawDragX,
         viewportWidth: this.viewportWidth,
         interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
-          this.showStartPageCustomize || this.showLibrary,
+          this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
         address: this.sceneAddress(),
         searchQuery: this.sceneSearchQuery(),
         addressDraft: this.draftForSceneTab(),
@@ -4417,7 +4674,8 @@ export struct BrowserShell {
               this.overviewProgress,
               this.overviewClosing || this.overviewAnimationClosing
             ) === 'live-page',
-            interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging,
+            interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
+              this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
             currentItems: this.startPageItems,
             errorState: this.errorState,
             onOpen: (url: string) => this.loadAddress(url, 'start-page-entry', 'BrowserTransitionScene.onOpen'),
@@ -4459,7 +4717,7 @@ export struct BrowserShell {
               rawDragX: this.rawDragX,
               viewportWidth: this.viewportWidth,
               interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
-                this.showStartPageCustomize || this.showLibrary,
+                this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
               bottomInset: this.bottomAvoidInset,
               canGoBack: this.canNavigateBack,
               canGoForward: this.canNavigateForward,
@@ -4603,7 +4861,7 @@ export struct BrowserShell {
         // from clipping the shared-page handoff.
         this.buildAddressTransitionLayer();
 
-        if (this.showLibrary && this.overviewProgress === 0) {
+        if (this.showLibrary && !this.showDownloadManager && this.overviewProgress === 0) {
           LibrarySheet({
             history: this.historyItems,
             bookmarks: this.bookmarkItems,
@@ -4635,7 +4893,7 @@ export struct BrowserShell {
             )
         }
 
-        if (this.showStartPageCustomize && this.overviewProgress === 0) {
+        if (this.showStartPageCustomize && !this.showDownloadManager && this.overviewProgress === 0) {
           StartPageCustomizeSheet({
             settings: this.browserSettings,
             items: this.startPageItems,
@@ -4673,7 +4931,7 @@ export struct BrowserShell {
         }
 
         if (this.pageSnapshot !== undefined && this.overviewProgress === 0 &&
-          !this.showLibrary) {
+          !this.showLibrary && !this.showStartPageCustomize && !this.showDownloadManager) {
           Stack() {
             Column() {
               Row() {

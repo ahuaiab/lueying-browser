@@ -1,4 +1,4 @@
-import { Context } from '@kit.AbilityKit';
+import { common, Context } from '@kit.AbilityKit';
 import { notificationManager } from '@kit.NotificationKit';
 
 export interface NotificationPermissionPort {
@@ -11,7 +11,7 @@ export interface NotificationRequestClient {
 
 class HarmonyNotificationRequestClient implements NotificationRequestClient {
   async requestEnableNotification(context: Context): Promise<void> {
-    return await notificationManager.requestEnableNotification(context);
+    return await notificationManager.requestEnableNotification(context as common.UIAbilityContext);
   }
 }
 
