@@ -129,6 +129,7 @@ export class DownloadStore {
     if (patch.error !== undefined) target.error = patch.error;
     if (patch.mimeType !== undefined) target.mimeType = patch.mimeType;
     if (patch.isPrivate !== undefined) target.isPrivate = patch.isPrivate;
+    if (patch.savePath !== undefined) target.savePath = patch.savePath;
     target.updatedAt = this.now();
   }
 
@@ -158,6 +159,7 @@ export class DownloadStore {
       updatedAt: task.updatedAt,
       isPrivate: task.isPrivate
     };
+    if (task.savePath !== undefined) copy.savePath = task.savePath;
     if (task.mimeType !== undefined) copy.mimeType = task.mimeType;
     if (task.error !== undefined) copy.error = task.error;
     return copy;

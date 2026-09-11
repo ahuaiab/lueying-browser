@@ -2,6 +2,8 @@ import { describe, expect, it } from '@ohos/hypium';
 import { Context } from '@kit.AbilityKit';
 import {
   AgentTaskSnapshot,
+  AgentTaskStatus,
+  canonicalAgentStatus,
   RequestAgentClient,
   RequestAgentGateway,
   RequestAgentSystemConfig,
@@ -51,8 +53,8 @@ class FakeRequestClient implements RequestAgentClient {
 
   async search(): Promise<AgentTaskSnapshot[]> {
     return [
-      { taskId: this.task.taskId, status: 'RUNNING', receivedBytes: 8, totalBytes: 10, percent: 80, description: 'jianyue-download:key-1' },
-      { taskId: 'other-agent', status: 'RUNNING', receivedBytes: 1, totalBytes: 2, percent: 50, description: 'other-download:key-2' }
+      { taskId: this.task.taskId, status: AgentTaskStatus.RUNNING, receivedBytes: 8, totalBytes: 10, percent: 80, description: 'jianyue-download:key-1' },
+      { taskId: 'other-agent', status: AgentTaskStatus.RUNNING, receivedBytes: 1, totalBytes: 2, percent: 50, description: 'jianyue-download:key-2' }
     ];
   }
 
@@ -60,7 +62,7 @@ class FakeRequestClient implements RequestAgentClient {
     if (taskId !== this.task.taskId) {
       return undefined;
     }
-    return { taskId, status: 'RUNNING', receivedBytes: 8, totalBytes: 10, percent: 80, description: 'jianyue-download:key-1' };
+    return { taskId, status: AgentTaskStatus.RUNNING, receivedBytes: 8, totalBytes: 10, percent: 80, description: 'jianyue-download:key-1' };
   }
 }
 
@@ -78,6 +80,15 @@ class FakeNotificationClient implements NotificationRequestClient {
 
 export default function downloadAgentPortsTest() {
   describe('DownloadAgentPorts', () => {
+    it('normalizes numeric request-agent states to canonical statuses', 0, () => {
+      expect(canonicalAgentStatus(0x20)).assertEqual(AgentTaskStatus.RUNNING);
+      expect(canonicalAgentStatus(0x30)).assertEqual(AgentTaskStatus.PAUSED);
+      expect(canonicalAgentStatus(0x31)).assertEqual(AgentTaskStatus.CANCELLED);
+      expect(canonicalAgentStatus(0x40)).assertEqual(AgentTaskStatus.COMPLETED);
+      expect(canonicalAgentStatus(0x41)).assertEqual(AgentTaskStatus.FAILED);
+      expect(canonicalAgentStatus(0x50)).assertEqual(AgentTaskStatus.CANCELLED);
+    });
+
     it('creates a background private-path task and forwards progress callbacks', 0, async () => {
       const client: FakeRequestClient = new FakeRequestClient();
       const gateway: RequestAgentGateway = new RequestAgentGateway({} as Context, client);
@@ -95,15 +106,15 @@ export default function downloadAgentPortsTest() {
       let completed: AgentTaskSnapshot | undefined = undefined;
       handle.onProgress((snapshot: AgentTaskSnapshot) => progress = snapshot);
       handle.onCompleted((snapshot: AgentTaskSnapshot) => completed = snapshot);
-      client.task.emit('progress', { taskId: 'agent-1', status: 'RUNNING', receivedBytes: 4, totalBytes: 10, percent: 40 });
-      client.task.emit('completed', { taskId: 'agent-1', status: 'COMPLETED', receivedBytes: 10, totalBytes: 10, percent: 100 });
+      client.task.emit('progress', { taskId: 'agent-1', status: AgentTaskStatus.RUNNING, receivedBytes: 4, totalBytes: 10, percent: 40 });
+      client.task.emit('completed', { taskId: 'agent-1', status: AgentTaskStatus.COMPLETED, receivedBytes: 10, totalBytes: 10, percent: 100 });
 
       expect(client.createdConfig?.action).assertEqual('DOWNLOAD');
       expect(client.createdConfig?.mode).assertEqual('BACKGROUND');
       expect(client.createdConfig?.saveas.startsWith('/data/storage/el2/base/files/')).assertTrue();
       expect(client.createdConfig?.description).assertEqual('jianyue-download:key-1');
       expect(progress?.percent).assertEqual(40);
-      expect(completed?.status).assertEqual('COMPLETED');
+      expect(completed?.status).assertEqual(AgentTaskStatus.COMPLETED);
       expect(JSON.stringify(await gateway.show('agent-1')).includes('session=secret')).assertFalse();
       expect((await gateway.searchByPrefix('jianyue-download:')).length).assertEqual(1);
     });

@@ -12,15 +12,61 @@ export interface AgentDownloadConfig {
   notificationEnabled: boolean;
 }
 
+export enum AgentTaskStatus {
+  RUNNING = 'RUNNING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  PAUSED = 'PAUSED',
+  CANCELLED = 'CANCELLED'
+}
+
 export interface AgentTaskSnapshot {
   taskId: string;
-  status: string;
+  status: AgentTaskStatus;
   receivedBytes: number;
   totalBytes: number;
   percent: number;
   description?: string;
   savePath?: string;
   error?: string;
+}
+
+/**
+ * Converts the numeric request.agent.State enum to the service's stable
+ * status vocabulary. The string branch keeps the adapter tolerant of enum
+ * names returned by test doubles or platform bridges.
+ */
+export function canonicalAgentStatus(
+  state: request.agent.State | number | string,
+  fallback: AgentTaskStatus = AgentTaskStatus.RUNNING
+): AgentTaskStatus {
+  const normalized: string = String(state).trim().toUpperCase();
+  if (normalized.endsWith('COMPLETED')) return AgentTaskStatus.COMPLETED;
+  if (normalized.endsWith('FAILED')) return AgentTaskStatus.FAILED;
+  if (normalized.endsWith('PAUSED')) return AgentTaskStatus.PAUSED;
+  if (normalized.endsWith('STOPPED') || normalized.endsWith('CANCELLED') || normalized.endsWith('CANCELED') ||
+    normalized.endsWith('REMOVED')) return AgentTaskStatus.CANCELLED;
+  if (normalized.endsWith('RUNNING') || normalized.endsWith('RETRYING') || normalized.endsWith('WAITING') ||
+    normalized.endsWith('INITIALIZED')) return AgentTaskStatus.RUNNING;
+
+  switch (Number(state)) {
+    case 0x40:
+      return AgentTaskStatus.COMPLETED;
+    case 0x41:
+      return AgentTaskStatus.FAILED;
+    case 0x30:
+      return AgentTaskStatus.PAUSED;
+    case 0x31:
+    case 0x50:
+      return AgentTaskStatus.CANCELLED;
+    case 0x00:
+    case 0x10:
+    case 0x20:
+    case 0x21:
+      return AgentTaskStatus.RUNNING;
+    default:
+      return fallback;
+  }
 }
 
 export interface AgentTaskHandle {
@@ -86,11 +132,13 @@ class HarmonyRequestAgentTask implements RequestAgentSystemTask {
 
   on(event: string, listener: (snapshot: AgentTaskSnapshot) => void): void {
     if (event === 'progress') {
-      this.task.on('progress', (progress: request.agent.Progress) => listener(this.snapshot('RUNNING', progress)));
+      this.task.on('progress', (progress: request.agent.Progress) => listener(this.snapshot(progress)));
     } else if (event === 'completed') {
-      this.task.on('completed', (progress: request.agent.Progress) => listener(this.snapshot('COMPLETED', progress)));
+      this.task.on('completed', (progress: request.agent.Progress) =>
+        listener(this.snapshot(progress, AgentTaskStatus.COMPLETED)));
     } else if (event === 'failed') {
-      this.task.on('failed', (progress: request.agent.Progress) => listener(this.snapshot('FAILED', progress)));
+      this.task.on('failed', (progress: request.agent.Progress) =>
+        listener(this.snapshot(progress, AgentTaskStatus.FAILED)));
     }
   }
 
@@ -106,11 +154,11 @@ class HarmonyRequestAgentTask implements RequestAgentSystemTask {
     await request.agent.remove(this.taskId);
   }
 
-  private snapshot(status: string, progress: request.agent.Progress): AgentTaskSnapshot {
+  private snapshot(progress: request.agent.Progress, fallback: AgentTaskStatus = AgentTaskStatus.RUNNING): AgentTaskSnapshot {
     const totalBytes: number = progress.sizes.length === 0 ? -1 : progress.sizes[0];
     return {
       taskId: this.taskId,
-      status,
+      status: canonicalAgentStatus(progress.state, fallback),
       receivedBytes: progress.processed,
       totalBytes,
       percent: percentForAgent(progress.processed, totalBytes)
@@ -178,7 +226,7 @@ class HarmonyRequestAgentClient implements RequestAgentClient {
     const totalBytes: number = task.progress.sizes.length === 0 ? -1 : task.progress.sizes[0];
     return {
       taskId: task.tid,
-      status: String(task.state),
+      status: canonicalAgentStatus(task.progress.state),
       receivedBytes: task.progress.processed,
       totalBytes,
       percent: percentForAgent(task.progress.processed, totalBytes),

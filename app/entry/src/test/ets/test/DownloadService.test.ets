@@ -6,7 +6,8 @@ import {
   AgentDownloadConfig,
   AgentDownloadPort,
   AgentTaskHandle,
-  AgentTaskSnapshot
+  AgentTaskSnapshot,
+  AgentTaskStatus
 } from '../../../main/ets/browser/web/RequestAgentGateway';
 import { NotificationPermissionPort } from '../../../main/ets/browser/web/DownloadNotificationGateway';
 import { DownloadService, WebCookiePort } from '../../../main/ets/browser/web/DownloadService';
@@ -61,8 +62,10 @@ class FakeAgent implements AgentDownloadPort {
   readonly events: string[];
   readonly task: FakeAgentTask = new FakeAgentTask('agent-1');
   createCalls: number = 0;
+  showCalls: number = 0;
   shouldFailCreate: boolean = false;
   recovered: AgentTaskHandle | undefined = undefined;
+  showSnapshot: AgentTaskSnapshot | undefined = undefined;
 
   constructor(events: string[]) {
     this.events = events;
@@ -86,7 +89,8 @@ class FakeAgent implements AgentDownloadPort {
   }
 
   async show(_taskId: string): Promise<AgentTaskSnapshot | undefined> {
-    return undefined;
+    this.showCalls += 1;
+    return this.showSnapshot;
   }
 }
 
@@ -109,16 +113,21 @@ class FakeItem {
   readonly events: string[];
   readonly url: string;
   readonly method: string;
+  readonly guid: string;
   starts: string[] = [];
   cancelCalls: number = 0;
+  shouldThrowStart: boolean = false;
+  shouldThrowCancel: boolean = false;
 
-  constructor(events: string[], url: string = 'https://example.com/archive.zip', method: string = 'GET') {
+  constructor(events: string[], url: string = 'https://example.com/archive.zip', method: string = 'GET',
+    guid: string = 'web-guid-1') {
     this.events = events;
     this.url = url;
     this.method = method;
+    this.guid = guid;
   }
 
-  getGuid(): string { return 'web-guid-1'; }
+  getGuid(): string { return this.guid; }
   getUrl(): string { return this.url; }
   getMethod(): string { return this.method; }
   getMimeType(): string { return 'application/zip'; }
@@ -126,8 +135,20 @@ class FakeItem {
   getReceivedBytes(): number { return 25; }
   getTotalBytes(): number { return 100; }
   getPercentComplete(): number { return 25; }
-  start(path: string): void { this.starts.push(path); this.events.push('item.start'); }
-  cancel(): void { this.cancelCalls += 1; this.events.push('item.cancel'); }
+  start(path: string): void {
+    this.starts.push(path);
+    this.events.push('item.start');
+    if (this.shouldThrowStart) {
+      throw new Error('native start failed');
+    }
+  }
+  cancel(): void {
+    this.cancelCalls += 1;
+    this.events.push('item.cancel');
+    if (this.shouldThrowCancel) {
+      throw new Error('ArkWeb cancel failed');
+    }
+  }
 }
 
 async function flush(): Promise<void> {
@@ -140,13 +161,14 @@ function itemAsWebDownloadItem(item: FakeItem): webview.WebDownloadItem {
   return item as unknown as webview.WebDownloadItem;
 }
 
-function createService(events: string[]): { service: DownloadService, storage: MemoryStorage, agent: FakeAgent, cookie: FakeCookiePort } {
+function createService(events: string[], pathExists: ((path: string) => boolean) | undefined = undefined):
+  { service: DownloadService, storage: MemoryStorage, agent: FakeAgent, cookie: FakeCookiePort } {
   const storage: MemoryStorage = new MemoryStorage();
   const agent: FakeAgent = new FakeAgent(events);
   const cookie: FakeCookiePort = new FakeCookiePort();
   return {
     service: new DownloadService(new DownloadStore(storage, () => 100), agent, new FakeNotificationPort(), cookie,
-      '/data/storage/el2/base/files', () => 100),
+      '/data/storage/el2/base/files', () => 100, pathExists),
     storage,
     agent,
     cookie
@@ -221,6 +243,97 @@ export default function downloadServiceTest() {
 
       expect(setup.agent.createCalls).assertEqual(0);
       expect(setup.service.snapshot().length).assertEqual(1);
+    });
+
+    it('merges the shown terminal agent state before deciding whether to attach', 0, async () => {
+      const events: string[] = [];
+      const setup = createService(events);
+      setup.storage.records = [{
+        id: 'web-guid-1', agentTaskId: 'agent-1', reconcileKey: 'web-guid-1', tabId: 'tab-1',
+        url: 'https://example.com/archive.zip', filename: 'archive.zip', backend: 'request-agent',
+        status: 'running', receivedBytes: 2, totalBytes: 100, percent: 2, createdAt: 1, updatedAt: 1,
+        isPrivate: false
+      } as DownloadTaskRecord];
+      setup.agent.recovered = setup.agent.task;
+      setup.agent.showSnapshot = {
+        taskId: 'agent-1', status: AgentTaskStatus.COMPLETED, receivedBytes: 100, totalBytes: 100, percent: 100
+      };
+
+      await setup.service.restore();
+      setup.agent.task.progress({
+        taskId: 'agent-1', status: AgentTaskStatus.RUNNING, receivedBytes: 3, totalBytes: 100, percent: 3
+      });
+
+      expect(setup.agent.showCalls).assertEqual(1);
+      expect(setup.service.snapshot()[0].status).assertEqual('completed');
+      expect(setup.service.snapshot()[0].receivedBytes).assertEqual(100);
+    });
+
+    it('keeps the agent backend when ArkWeb cancellation throws after handoff', 0, async () => {
+      const events: string[] = [];
+      const setup = createService(events);
+      const item: FakeItem = new FakeItem(events);
+      item.shouldThrowCancel = true;
+
+      setup.service.onBeforeDownload('tab-1', itemAsWebDownloadItem(item), false);
+      await flush();
+
+      expect(item.starts.length).assertEqual(0);
+      expect(setup.agent.createCalls).assertEqual(1);
+      expect(setup.service.snapshot()[0].agentTaskId).assertEqual('agent-1');
+      expect(setup.service.snapshot()[0].status).assertEqual('running');
+      expect((setup.service.snapshot()[0].error ?? '').length > 0).assertTrue();
+    });
+
+    it('marks native start errors as retryable failures', 0, async () => {
+      const events: string[] = [];
+      const setup = createService(events);
+      const item: FakeItem = new FakeItem(events, 'blob:https://example.com/1');
+      item.shouldThrowStart = true;
+
+      setup.service.onBeforeDownload('tab-1', itemAsWebDownloadItem(item), false);
+      await flush();
+
+      expect(setup.service.snapshot()[0].status).assertEqual('failed');
+      expect((setup.service.snapshot()[0].error ?? '').length > 0).assertTrue();
+    });
+
+    it('allocates a distinct path when the base target already exists and on retry', 0, async () => {
+      const existing: Set<string> = new Set();
+      const pathExists: (path: string) => boolean = (path: string): boolean => existing.has(path);
+      const events: string[] = [];
+      const setup = createService(events, pathExists);
+      const item: FakeItem = new FakeItem(events, 'blob:https://example.com/1');
+      existing.add('/data/storage/el2/base/files/downloads/web-guid-1-archive.zip');
+
+      setup.service.onBeforeDownload('tab-1', itemAsWebDownloadItem(item), false);
+      await flush();
+      const firstPath: string = item.starts[0];
+      existing.add(firstPath);
+      setup.service.onDownloadFailed('tab-1', itemAsWebDownloadItem(item));
+      await setup.service.retry('web-guid-1');
+
+      expect(firstPath.endsWith('-archive.zip')).assertTrue();
+      expect(item.starts.length).assertEqual(2);
+      expect(item.starts[1] === firstPath).assertFalse();
+    });
+
+    it('reuses one generated id for empty-guid update, finish and failure callbacks', 0, async () => {
+      const events: string[] = [];
+      const setup = createService(events);
+      const item: FakeItem = new FakeItem(events, 'blob:https://example.com/1', 'GET', '');
+
+      setup.service.onBeforeDownload('tab-1', itemAsWebDownloadItem(item), false);
+      await flush();
+      const id: string = setup.service.snapshot()[0].id;
+      setup.service.onDownloadUpdated('tab-1', itemAsWebDownloadItem(item));
+      expect(setup.service.snapshot()[0].id).assertEqual(id);
+      setup.service.onDownloadFinish('tab-1', itemAsWebDownloadItem(item));
+      setup.service.onDownloadFailed('tab-1', itemAsWebDownloadItem(item));
+
+      expect(setup.service.snapshot().length).assertEqual(1);
+      expect(setup.service.snapshot()[0].id).assertEqual(id);
+      expect(setup.service.snapshot()[0].status).assertEqual('completed');
     });
   });
 }

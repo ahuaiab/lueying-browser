@@ -28,6 +28,7 @@ export interface DownloadTaskRecord {
   createdAt: number;
   updatedAt: number;
   isPrivate: boolean;
+  savePath?: string;
   mimeType?: string;
   error?: string;
 }
@@ -45,6 +46,7 @@ export interface DownloadTaskPatch {
   error?: string;
   mimeType?: string;
   isPrivate?: boolean;
+  savePath?: string;
 }
 
 export interface DownloadProgressSnapshot {

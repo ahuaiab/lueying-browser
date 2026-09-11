@@ -10,7 +10,12 @@ import {
 } from '../model/DownloadModels';
 import { TabId } from '../model/BrowserTypes';
 import { NotificationPermissionPort } from './DownloadNotificationGateway';
-import { AgentDownloadPort, AgentTaskHandle, AgentTaskSnapshot } from './RequestAgentGateway';
+import {
+  AgentDownloadPort,
+  AgentTaskHandle,
+  AgentTaskSnapshot,
+  AgentTaskStatus
+} from './RequestAgentGateway';
 import { WebDownloadHandler } from './WebTabNode';
 
 export interface WebCookiePort {
@@ -24,12 +29,15 @@ export class DownloadService implements WebDownloadHandler {
   private readonly cookie: WebCookiePort;
   private readonly filesDir: string;
   private readonly now: () => number;
+  private readonly pathExists: (path: string) => boolean;
   private listener: ((tasks: DownloadTaskRecord[]) => void) | undefined = undefined;
   private readonly handles: Map<string, AgentTaskHandle> = new Map();
   private readonly nativeItems: Map<string, webview.WebDownloadItem> = new Map();
+  private readonly itemIds: Map<webview.WebDownloadItem, string> = new Map();
+  private readonly reservedPaths: Set<string> = new Set();
   private readonly intentionalArkWebCancels: Set<string> = new Set();
   private uiLoaded: boolean = false;
-  private pathSequence: number = 0;
+  private idSequence: number = 0;
 
   constructor(
     store: DownloadStore,
@@ -37,7 +45,8 @@ export class DownloadService implements WebDownloadHandler {
     notification: NotificationPermissionPort,
     cookie: WebCookiePort,
     filesDir: string,
-    now: () => number = () => Date.now()
+    now: () => number = () => Date.now(),
+    pathExists: ((path: string) => boolean) | undefined = undefined
   ) {
     this.store = store;
     this.agent = agent;
@@ -45,17 +54,34 @@ export class DownloadService implements WebDownloadHandler {
     this.cookie = cookie;
     this.filesDir = filesDir;
     this.now = now;
+    this.pathExists = pathExists ?? ((path: string): boolean => this.fileExists(path));
   }
 
   async restore(): Promise<void> {
     await this.store.restore();
     const tasks: DownloadTaskRecord[] = this.store.snapshot();
     const recoveredHandles: Map<string, AgentTaskHandle> = new Map();
+    const knownAgentTasks: Set<string> = new Set();
     for (const task of tasks) {
       if (task.backend === DownloadBackend.REQUEST_AGENT && task.agentTaskId.length > 0) {
-        const handle: AgentTaskHandle | undefined = await this.agent.getTask(task.agentTaskId);
+        let handle: AgentTaskHandle | undefined = undefined;
+        try {
+          handle = await this.agent.getTask(task.agentTaskId);
+        } catch (_error) {
+          handle = undefined;
+        }
         if (handle !== undefined) {
           recoveredHandles.set(task.id, handle);
+        }
+        let shown: AgentTaskSnapshot | undefined = undefined;
+        try {
+          shown = await this.agent.show(task.agentTaskId);
+        } catch (_error) {
+          shown = undefined;
+        }
+        if (shown !== undefined) {
+          knownAgentTasks.add(task.id);
+          this.mergeAgentSnapshot(task, shown);
         }
       }
     }
@@ -67,6 +93,7 @@ export class DownloadService implements WebDownloadHandler {
       if (matching === undefined) {
         continue;
       }
+      knownAgentTasks.add(matching.id);
       discoveredIds.add(matching.id);
       this.mergeAgentSnapshot(matching, snapshot);
     }
@@ -78,7 +105,7 @@ export class DownloadService implements WebDownloadHandler {
       const handle: AgentTaskHandle | undefined = recoveredHandles.get(task.id);
       if (handle !== undefined) {
         this.attachAgentHandle(task.id, handle);
-      } else if (!discoveredIds.has(task.id)) {
+      } else if (!knownAgentTasks.has(task.id) && !discoveredIds.has(task.id)) {
         this.store.transition(task.id, DownloadStatus.FAILED, {
           error: '后台下载任务不可用；请重试。'
         });
@@ -108,6 +135,9 @@ export class DownloadService implements WebDownloadHandler {
     if (this.intentionalArkWebCancels.has(id)) {
       return;
     }
+    if (this.isTerminalTask(id)) {
+      return;
+    }
     const receivedBytes: number = item.getReceivedBytes();
     const totalBytes: number = item.getTotalBytes();
     const percent: number = totalBytes > 0 ? percentForDownload(receivedBytes, totalBytes) : item.getPercentComplete();
@@ -124,6 +154,9 @@ export class DownloadService implements WebDownloadHandler {
     if (this.intentionalArkWebCancels.has(id)) {
       return;
     }
+    if (this.isTerminalTask(id)) {
+      return;
+    }
     this.store.transition(id, DownloadStatus.COMPLETED, {
       receivedBytes: item.getReceivedBytes(),
       totalBytes: item.getTotalBytes(),
@@ -138,10 +171,12 @@ export class DownloadService implements WebDownloadHandler {
     if (this.intentionalArkWebCancels.has(id)) {
       return;
     }
+    if (this.isTerminalTask(id)) {
+      return;
+    }
     this.store.transition(id, DownloadStatus.FAILED, {
       error: '网页下载失败；请重试。'
     });
-    this.nativeItems.delete(id);
     this.notify();
   }
 
@@ -170,7 +205,16 @@ export class DownloadService implements WebDownloadHandler {
     if (handle !== undefined) {
       await handle.cancel();
     } else {
-      this.nativeItems.get(id)?.cancel();
+      const item: webview.WebDownloadItem | undefined = this.nativeItems.get(id);
+      if (item !== undefined) {
+        this.intentionalArkWebCancels.add(id);
+        try {
+          item.cancel();
+        } catch (_error) {
+          // The task is still kept as cancelled; the marker prevents a late
+          // ArkWeb callback from changing the user-visible terminal state.
+        }
+      }
     }
     this.store.transition(id, DownloadStatus.CANCELLED, {});
     this.notify();
@@ -185,13 +229,19 @@ export class DownloadService implements WebDownloadHandler {
     }
     const item: webview.WebDownloadItem | undefined = this.nativeItems.get(id);
     if (task.backend === DownloadBackend.ARKWEB && item !== undefined) {
-      item.start(this.pathFor(task.filename, task.id));
-      this.store.transition(id, DownloadStatus.RUNNING, { error: '' });
-      this.notify();
+      const savePath: string = this.pathFor(task.filename, task.id);
+      this.store.transition(id, DownloadStatus.QUEUED, { savePath, error: '' });
+      this.startNative({ ...task, savePath, status: DownloadStatus.QUEUED }, item);
       return;
     }
     if (task.backend === DownloadBackend.REQUEST_AGENT && !task.isPrivate) {
-      await this.createAgentTask(task, undefined);
+      const savePath: string = this.pathFor(task.filename, task.id);
+      this.store.transition(id, DownloadStatus.HANDOFF_PENDING, {
+        agentTaskId: '',
+        savePath,
+        error: ''
+      });
+      await this.createAgentTask({ ...task, agentTaskId: '', savePath, status: DownloadStatus.HANDOFF_PENDING }, undefined);
     }
   }
 
@@ -208,6 +258,7 @@ export class DownloadService implements WebDownloadHandler {
     const url: string = item.getUrl();
     const filename: string = this.safeFilename(item.getSuggestedFileName(), id);
     const backend: DownloadBackend = classifyDownload(url, item.getMethod(), isPrivate);
+    const savePath: string = this.pathFor(filename, id);
     const task: DownloadTaskRecord = {
       id,
       agentTaskId: '',
@@ -223,6 +274,7 @@ export class DownloadService implements WebDownloadHandler {
       createdAt: this.now(),
       updatedAt: this.now(),
       isPrivate,
+      savePath,
       mimeType: item.getMimeType()
     };
     this.store.begin(task);
@@ -234,26 +286,19 @@ export class DownloadService implements WebDownloadHandler {
   }
 
   private async createAgentTask(task: DownloadTaskRecord, item: webview.WebDownloadItem | undefined): Promise<void> {
+    let handle: AgentTaskHandle;
     try {
       const cookie: string = await this.cookie.fetchCookie(task.url, task.isPrivate);
-      const handle: AgentTaskHandle = await this.agent.create({
+      handle = await this.agent.create({
         reconcileKey: task.reconcileKey,
         url: task.url,
-        savePath: this.pathFor(task.filename, task.id),
+        savePath: task.savePath ?? this.pathFor(task.filename, task.id),
         title: task.filename,
         description: 'jianyue-download:' + task.reconcileKey,
         headers: cookie.length === 0 ? {} : { Cookie: cookie },
         mimeType: task.mimeType ?? '',
         notificationEnabled: this.uiLoaded
       });
-      this.store.patch(task.id, { agentTaskId: handle.taskId });
-      this.attachAgentHandle(task.id, handle);
-      if (item !== undefined) {
-        this.intentionalArkWebCancels.add(task.id);
-        item.cancel();
-      }
-      this.store.transition(task.id, DownloadStatus.RUNNING, { error: '' });
-      this.notify();
     } catch (_error) {
       if (item === undefined) {
         this.store.transition(task.id, DownloadStatus.FAILED, { error: '后台下载创建失败；请重试。' });
@@ -261,12 +306,44 @@ export class DownloadService implements WebDownloadHandler {
         return;
       }
       this.startNative(task, item);
+      return;
     }
+
+    this.store.patch(task.id, { agentTaskId: handle.taskId });
+    this.attachAgentHandle(task.id, handle);
+    if (item !== undefined) {
+      this.intentionalArkWebCancels.add(task.id);
+      try {
+        item.cancel();
+      } catch (_error) {
+        this.store.transition(task.id, DownloadStatus.RUNNING, {
+          error: '后台下载已创建，但网页任务取消未确认；将保留后台任务并可恢复。'
+        });
+        this.notify();
+        return;
+      }
+    }
+    this.store.transition(task.id, DownloadStatus.RUNNING, { error: '' });
+    this.notify();
   }
 
   private startNative(task: DownloadTaskRecord, item: webview.WebDownloadItem): void {
     this.nativeItems.set(task.id, item);
-    item.start(this.pathFor(task.filename, task.id));
+    const savePath: string = task.savePath ?? this.pathFor(task.filename, task.id);
+    if (task.savePath === undefined) {
+      this.store.patch(task.id, { savePath });
+    }
+    try {
+      item.start(savePath);
+    } catch (_error) {
+      this.store.transition(task.id, DownloadStatus.FAILED, {
+        backend: DownloadBackend.ARKWEB,
+        agentTaskId: '',
+        error: '网页下载启动失败；请重试。'
+      });
+      this.notify();
+      return;
+    }
     this.store.transition(task.id, DownloadStatus.RUNNING, { backend: DownloadBackend.ARKWEB, agentTaskId: '', error: '' });
     this.notify();
   }
@@ -278,6 +355,9 @@ export class DownloadService implements WebDownloadHandler {
       this.notify();
     });
     handle.onCompleted((snapshot: AgentTaskSnapshot) => {
+      if (this.isTerminalTask(id)) {
+        return;
+      }
       this.store.transition(id, DownloadStatus.COMPLETED, {
         receivedBytes: snapshot.receivedBytes,
         totalBytes: snapshot.totalBytes,
@@ -287,6 +367,9 @@ export class DownloadService implements WebDownloadHandler {
       this.notify();
     });
     handle.onFailed((snapshot: AgentTaskSnapshot) => {
+      if (this.isTerminalTask(id)) {
+        return;
+      }
       this.store.transition(id, DownloadStatus.FAILED, {
         error: snapshot.error ?? '后台下载失败；请重试。'
       });
@@ -299,13 +382,13 @@ export class DownloadService implements WebDownloadHandler {
     const reconcileKey: string = this.reconcileKeyFor(snapshot.description);
     return this.store.snapshot().find((task: DownloadTaskRecord) =>
       task.agentTaskId === snapshot.taskId || task.reconcileKey === reconcileKey ||
-      (snapshot.savePath !== undefined && snapshot.savePath === this.pathFor(task.filename, task.id))
+      (snapshot.savePath !== undefined && snapshot.savePath === (task.savePath ?? this.basePathFor(task.filename, task.id)))
     );
   }
 
   private mergeAgentSnapshot(task: DownloadTaskRecord, snapshot: AgentTaskSnapshot): void {
     const status: DownloadStatus = this.statusFor(snapshot.status);
-    this.store.mergeRecovered({
+    const merged: DownloadTaskRecord = {
       ...task,
       agentTaskId: snapshot.taskId,
       status,
@@ -314,16 +397,27 @@ export class DownloadService implements WebDownloadHandler {
       percent: snapshot.percent,
       updatedAt: this.now(),
       error: snapshot.error
-    });
+    };
+    if (snapshot.savePath !== undefined) {
+      merged.savePath = snapshot.savePath;
+    }
+    this.store.mergeRecovered(merged);
   }
 
-  private statusFor(value: string): DownloadStatus {
-    const status: string = value.toLowerCase();
-    if (status.includes('complete')) return DownloadStatus.COMPLETED;
-    if (status.includes('fail')) return DownloadStatus.FAILED;
-    if (status.includes('pause')) return DownloadStatus.PAUSED;
-    if (status.includes('cancel')) return DownloadStatus.CANCELLED;
-    return DownloadStatus.RUNNING;
+  private statusFor(value: AgentTaskStatus): DownloadStatus {
+    switch (value) {
+      case AgentTaskStatus.COMPLETED:
+        return DownloadStatus.COMPLETED;
+      case AgentTaskStatus.FAILED:
+        return DownloadStatus.FAILED;
+      case AgentTaskStatus.PAUSED:
+        return DownloadStatus.PAUSED;
+      case AgentTaskStatus.CANCELLED:
+        return DownloadStatus.CANCELLED;
+      case AgentTaskStatus.RUNNING:
+      default:
+        return DownloadStatus.RUNNING;
+    }
   }
 
   private async handleFor(id: string): Promise<AgentTaskHandle | undefined> {
@@ -345,12 +439,14 @@ export class DownloadService implements WebDownloadHandler {
   }
 
   private itemId(item: webview.WebDownloadItem): string {
-    const guid: string = item.getGuid().trim();
-    if (guid.length > 0) {
-      return guid;
+    const mapped: string | undefined = this.itemIds.get(item);
+    if (mapped !== undefined) {
+      return mapped;
     }
-    this.pathSequence += 1;
-    return `arkweb-${this.now()}-${this.pathSequence}`;
+    const guid: string = item.getGuid().trim();
+    const id: string = guid.length > 0 ? guid : `arkweb-${this.now()}-${this.idSequence++}`;
+    this.itemIds.set(item, id);
+    return id;
   }
 
   private safeFilename(suggested: string, id: string): string {
@@ -365,7 +461,31 @@ export class DownloadService implements WebDownloadHandler {
     } catch (_error) {
       // The directory may already exist or the Previewer may not expose a file system.
     }
-    return `${root}/${id.replace(/[^a-zA-Z0-9._-]/g, '_')}-${filename}`;
+    const safeId: string = id.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const baseName: string = `${safeId}-${filename}`;
+    let suffix: number = 0;
+    let candidate: string = `${root}/${baseName}`;
+    while (this.reservedPaths.has(candidate) || this.pathExists(candidate)) {
+      suffix += 1;
+      candidate = `${root}/${safeId}-${suffix}-${filename}`;
+    }
+    this.reservedPaths.add(candidate);
+    return candidate;
+  }
+
+  private basePathFor(filename: string, id: string): string {
+    const root: string = `${this.filesDir}/downloads`;
+    const safeId: string = id.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return `${root}/${safeId}-${filename}`;
+  }
+
+  private fileExists(path: string): boolean {
+    try {
+      fs.statSync(path);
+      return true;
+    } catch (_error) {
+      return false;
+    }
   }
 
   private reconcileKeyFor(description: string | undefined): string {
@@ -376,6 +496,13 @@ export class DownloadService implements WebDownloadHandler {
   private isTerminal(status: DownloadStatus): boolean {
     return status === DownloadStatus.COMPLETED || status === DownloadStatus.FAILED ||
       status === DownloadStatus.CANCELLED;
+  }
+
+  private isTerminalTask(id: string): boolean {
+    const task: DownloadTaskRecord | undefined = this.store.snapshot().find(
+      (candidate: DownloadTaskRecord) => candidate.id === id
+    );
+    return task !== undefined && this.isTerminal(task.status);
   }
 
   private notify(): void {
