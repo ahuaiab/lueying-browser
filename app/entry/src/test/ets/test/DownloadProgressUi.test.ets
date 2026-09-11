@@ -122,7 +122,7 @@ export default function downloadProgressUiTest() {
       expect(searchProps.downloadProgress).assertEqual(-1);
     });
 
-    it('maps unknown progress to an indeterminate ring state', 0, () => {
+    it('does not show a fake spinning ring when total size is unknown', 0, () => {
       const shellSnapshot = selectDownloadProgressForTab([
         downloadTask('unknown', 'tab-1', 50, -1)
       ], 'tab-1');
@@ -136,9 +136,9 @@ export default function downloadProgressUiTest() {
       );
 
       expect(searchProps.downloadProgress).assertEqual(-1);
-      expect(ringProps.visible).assertTrue();
+      expect(ringProps.visible).assertFalse();
       expect(ringProps.value).assertEqual(0);
-      expect(ringProps.status).assertEqual('LOADING');
+      expect(ringProps.status).assertEqual('PROGRESSING');
     });
 
     it('keeps the ring outside the lock while preserving the button contract', 0, () => {

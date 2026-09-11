@@ -50,7 +50,7 @@ export interface DownloadProgressRingProps {
   visible: boolean;
   id: string;
   value: number;
-  status: 'LOADING' | 'PROGRESSING';
+  status: 'PROGRESSING';
   color: string;
   buttonSize: number;
   lockImageSize: number;
@@ -65,13 +65,19 @@ export function downloadProgressRingProps(
   downloadActive: boolean,
   downloadProgress: number
 ): DownloadProgressRingProps {
-  const determinateValue: number = Math.max(0, Math.min(100, downloadProgress));
-  const indeterminate: boolean = downloadProgress < 0;
+  const hasDeterminateProgress: boolean = downloadActive && Number.isFinite(downloadProgress) &&
+    downloadProgress >= 0;
+  const determinateValue: number = hasDeterminateProgress
+    ? Math.max(0, Math.min(100, downloadProgress))
+    : 0;
   return {
-    visible: downloadActive,
+    // ProgressStatus.LOADING is an animated indeterminate spinner and does
+    // not consume value. Keep the lock visible while the backend has no
+    // denominator, then show the ring only when its percentage is real.
+    visible: hasDeterminateProgress,
     id: `browser-download-progress-ring-${inputIdentity}`,
-    value: indeterminate ? 0 : determinateValue,
-    status: indeterminate ? 'LOADING' : 'PROGRESSING',
+    value: determinateValue,
+    status: 'PROGRESSING',
     color: '#1677FF',
     buttonSize: 32,
     lockImageSize: 20,
@@ -341,9 +347,7 @@ export struct AddressSearchBar {
                     .color(this.downloadRingProps().color)
                     .style({
                       strokeWidth: this.downloadRingProps().strokeWidth,
-                      status: this.downloadRingProps().status === 'LOADING'
-                        ? ProgressStatus.LOADING
-                        : ProgressStatus.PROGRESSING
+                      status: ProgressStatus.PROGRESSING
                     });
                 }
                   Image(addressSecurityStateFor(this.address) === AddressSecurityState.SECURE
