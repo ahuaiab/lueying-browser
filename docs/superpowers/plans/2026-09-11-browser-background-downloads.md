@@ -104,7 +104,7 @@ Expected: FAIL because DownloadModels.ets and its exports do not exist yet.
 Run the failing suite:
 
 ~~~cmd
-python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\OneDrive\HarmonyOS\jianyue-browser\.superpowers\worktrees\browser-downloads --module entry --no-coverage --scope DownloadModels
+python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\OneDrive\HarmonyOS\jianyue-browser\.superpowers\worktrees\browser-downloads\app --module entry --no-coverage --scope DownloadModels
 ~~~
 
 - [ ] Step 3: Implement the pure model.
@@ -141,7 +141,7 @@ Expected: PASS for the new model test compilation and no regression in existing 
 Run the passing suite with the same command and require a successful JSON result with zero failed cases:
 
 ~~~cmd
-python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\OneDrive\HarmonyOS\jianyue-browser\.superpowers\worktrees\browser-downloads --module entry --no-coverage --scope DownloadModels
+python D:\.codex\skills\hmos-local-test\scripts\run_local_test.py --project-path E:\OneDrive\HarmonyOS\jianyue-browser\.superpowers\worktrees\browser-downloads\app --module entry --no-coverage --scope DownloadModels
 ~~~
 
 - [ ] Step 6: Commit the self-contained model change.
