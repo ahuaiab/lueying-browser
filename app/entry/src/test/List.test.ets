@@ -19,6 +19,7 @@ import downloadServiceTest from './ets/test/DownloadService.test';
 import browserDownloadLifecycleTest from './ets/test/BrowserDownloadLifecycle.test';
 import downloadProgressUiTest from './ets/test/DownloadProgressUi.test';
 import downloadManagerUiTest from './ets/test/DownloadManagerUi.test';
+import defaultBrowserApiTest from './ets/test/DefaultBrowserApi.test';
 
 export default function testsuite() {
   tabStoreTest();
@@ -42,4 +43,5 @@ export default function testsuite() {
   browserDownloadLifecycleTest();
   downloadProgressUiTest();
   downloadManagerUiTest();
+  defaultBrowserApiTest();
 }
