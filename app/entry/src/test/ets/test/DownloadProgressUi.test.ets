@@ -5,6 +5,19 @@ import {
   DownloadTaskRecord
 } from '../../../main/ets/browser/model/DownloadModels';
 import { selectDownloadProgressForTab } from '../../../main/ets/browser/components/BrowserShell';
+import {
+  addressSearchBarDownloadProps,
+  downloadProgressRingProps
+} from '../../../main/ets/browser/components/AddressSearchBar';
+import {
+  addressTabStripDownloadSnapshotForItem
+} from '../../../main/ets/browser/components/AddressTabStrip';
+import {
+  bottomBrowserBarDownloadSnapshot
+} from '../../../main/ets/browser/components/BottomBrowserBar';
+import {
+  addressLockImageVerticalOffsetFor
+} from '../../../main/ets/browser/model/BrowserInteraction';
 
 function downloadTask(
   id: string,
@@ -58,6 +71,100 @@ export default function downloadProgressUiTest() {
       ], 'tab-1');
 
       expect(progress === undefined).assertTrue();
+    });
+
+    it('propagates an active snapshot through the shared address path only', 0, () => {
+      const shellSnapshot = selectDownloadProgressForTab([
+        downloadTask('active', 'tab-1', 50, 65),
+        downloadTask('inactive', 'tab-2', 60, 80)
+      ], 'tab-1');
+      const activeSnapshot = addressTabStripDownloadSnapshotForItem(shellSnapshot, 0, 0);
+      const inactiveSnapshot = addressTabStripDownloadSnapshotForItem(shellSnapshot, 1, 0);
+      const activeProps = addressSearchBarDownloadProps(activeSnapshot);
+      const inactiveProps = addressSearchBarDownloadProps(inactiveSnapshot);
+
+      expect(activeProps.downloadActive).assertTrue();
+      expect(activeProps.downloadProgress).assertEqual(65);
+      expect(inactiveProps.downloadActive).assertFalse();
+      expect(inactiveProps.downloadProgress).assertEqual(0);
+    });
+
+    it('propagates the same active snapshot through BottomBrowserBar address path', 0, () => {
+      const shellSnapshot = selectDownloadProgressForTab([
+        downloadTask('active', 'tab-1', 50, 65)
+      ], 'tab-1');
+      const bottomSnapshot = bottomBrowserBarDownloadSnapshot(shellSnapshot);
+      const activeSnapshot = addressTabStripDownloadSnapshotForItem(bottomSnapshot, 0, 0);
+      const inactiveSnapshot = addressTabStripDownloadSnapshotForItem(bottomSnapshot, 1, 0);
+      const activeProps = addressSearchBarDownloadProps(activeSnapshot);
+      const inactiveProps = addressSearchBarDownloadProps(inactiveSnapshot);
+
+      expect(bottomSnapshot === shellSnapshot).assertTrue();
+      expect(activeProps.downloadActive).assertTrue();
+      expect(activeProps.downloadProgress).assertEqual(65);
+      expect(inactiveProps.downloadActive).assertFalse();
+      expect(inactiveProps.downloadProgress).assertEqual(0);
+    });
+
+    it('preserves unknown progress through BottomBrowserBar address path', 0, () => {
+      const shellSnapshot = selectDownloadProgressForTab([
+        downloadTask('unknown', 'tab-1', 50, -1)
+      ], 'tab-1');
+      const searchProps = addressSearchBarDownloadProps(
+        addressTabStripDownloadSnapshotForItem(
+          bottomBrowserBarDownloadSnapshot(shellSnapshot),
+          0,
+          0
+        )
+      );
+
+      expect(searchProps.downloadActive).assertTrue();
+      expect(searchProps.downloadProgress).assertEqual(-1);
+    });
+
+    it('maps unknown progress to an indeterminate ring state', 0, () => {
+      const shellSnapshot = selectDownloadProgressForTab([
+        downloadTask('unknown', 'tab-1', 50, -1)
+      ], 'tab-1');
+      const searchProps = addressSearchBarDownloadProps(
+        addressTabStripDownloadSnapshotForItem(shellSnapshot, 0, 0)
+      );
+      const ringProps = downloadProgressRingProps(
+        'address-input-tab-1',
+        searchProps.downloadActive,
+        searchProps.downloadProgress
+      );
+
+      expect(searchProps.downloadProgress).assertEqual(-1);
+      expect(ringProps.visible).assertTrue();
+      expect(ringProps.value).assertEqual(0);
+      expect(ringProps.status).assertEqual('LOADING');
+    });
+
+    it('keeps the ring outside the lock while preserving the button contract', 0, () => {
+      const ringProps = downloadProgressRingProps('address-input-tab-1', true, 65);
+
+      expect(ringProps.id).assertEqual('browser-download-progress-ring-address-input-tab-1');
+      expect(ringProps.value).assertEqual(65);
+      expect(ringProps.status).assertEqual('PROGRESSING');
+      expect(ringProps.color).assertEqual('#1677FF');
+      expect(ringProps.buttonSize).assertEqual(32);
+      expect(ringProps.lockImageSize).assertEqual(20);
+      expect(ringProps.size).assertEqual(28);
+      expect(ringProps.strokeWidth).assertEqual(2);
+      expect(ringProps.ringOffset).assertEqual(2);
+      expect(ringProps.lockImageOffsetX).assertEqual(6);
+      expect(ringProps.ringOffset < ringProps.lockImageOffsetX).assertTrue();
+      expect(ringProps.ringOffset + ringProps.size >
+        ringProps.lockImageOffsetX + ringProps.lockImageSize).assertTrue();
+      expect(ringProps.ringOffset + ringProps.size / 2).assertEqual(
+        ringProps.lockImageOffsetX + ringProps.lockImageSize / 2
+      );
+      expect(ringProps.ringOffset + ringProps.size / 2).assertEqual(
+        addressLockImageVerticalOffsetFor(ringProps.buttonSize, ringProps.lockImageSize) +
+          ringProps.lockImageSize / 2
+      );
+      expect(ringProps.size - ringProps.strokeWidth * 2 > ringProps.lockImageSize).assertTrue();
     });
   });
 }

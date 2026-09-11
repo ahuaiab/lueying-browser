@@ -30,6 +30,57 @@ import {
   syncAddressDraft
 } from '../model/BrowserInteraction';
 import { SAFARI_ADDRESS_LOCK_SAFE_INSET_VP } from '../model/BrowserVisualMetrics';
+import { DownloadProgressSnapshot } from '../model/DownloadModels';
+
+export interface AddressSearchBarDownloadProps {
+  downloadActive: boolean;
+  downloadProgress: number;
+}
+
+export function addressSearchBarDownloadProps(
+  snapshot: DownloadProgressSnapshot | undefined
+): AddressSearchBarDownloadProps {
+  return {
+    downloadActive: snapshot !== undefined,
+    downloadProgress: snapshot?.percent ?? 0
+  };
+}
+
+export interface DownloadProgressRingProps {
+  visible: boolean;
+  id: string;
+  value: number;
+  status: 'LOADING' | 'PROGRESSING';
+  color: string;
+  buttonSize: number;
+  lockImageSize: number;
+  lockImageOffsetX: number;
+  size: number;
+  ringOffset: number;
+  strokeWidth: number;
+}
+
+export function downloadProgressRingProps(
+  inputIdentity: string,
+  downloadActive: boolean,
+  downloadProgress: number
+): DownloadProgressRingProps {
+  const determinateValue: number = Math.max(0, Math.min(100, downloadProgress));
+  const indeterminate: boolean = downloadProgress < 0;
+  return {
+    visible: downloadActive,
+    id: `browser-download-progress-ring-${inputIdentity}`,
+    value: indeterminate ? 0 : determinateValue,
+    status: indeterminate ? 'LOADING' : 'PROGRESSING',
+    color: '#1677FF',
+    buttonSize: 32,
+    lockImageSize: 20,
+    lockImageOffsetX: 6,
+    size: 28,
+    ringOffset: 2,
+    strokeWidth: 2
+  };
+}
 
 /**
  * Safari-like address/search chrome. The search field is intentionally a
@@ -168,6 +219,14 @@ export struct AddressSearchBar {
     return Math.max(0, Math.min(1, this.inputExpandProgress));
   }
 
+  private downloadRingProps(): DownloadProgressRingProps {
+    return downloadProgressRingProps(
+      this.inputIdentity,
+      this.downloadActive,
+      this.downloadProgress
+    );
+  }
+
   private isStartPage(): boolean {
     return this.address === 'about:blank';
   }
@@ -259,47 +318,53 @@ export struct AddressSearchBar {
           if (!this.isStartPage()) {
             Button({ type: ButtonType.Normal, stateEffect: false }) {
               Stack({ alignContent: Alignment.TopStart }) {
-                if (this.downloadActive) {
+                if (this.downloadRingProps().visible) {
                   Progress({
-                    value: this.downloadProgress < 0 ? 0 : this.downloadProgress,
+                    value: this.downloadRingProps().value,
                     total: 100,
                     type: ProgressType.Ring
                   })
-                    .id(`browser-download-progress-ring-${this.inputIdentity}`)
-                    .width(28)
-                    .height(28)
-                    .position({ x: 2, y: 2 })
-                    .color('#1677FF')
+                    .id(this.downloadRingProps().id)
+                    .width(this.downloadRingProps().size)
+                    .height(this.downloadRingProps().size)
+                    .position({
+                      x: this.downloadRingProps().ringOffset,
+                      y: this.downloadRingProps().ringOffset
+                    })
+                    .color(this.downloadRingProps().color)
                     .style({
-                      strokeWidth: 2,
-                      status: this.downloadProgress < 0
+                      strokeWidth: this.downloadRingProps().strokeWidth,
+                      status: this.downloadRingProps().status === 'LOADING'
                         ? ProgressStatus.LOADING
                         : ProgressStatus.PROGRESSING
                     });
                 }
-                Image(addressSecurityStateFor(this.address) === AddressSecurityState.SECURE
+                  Image(addressSecurityStateFor(this.address) === AddressSecurityState.SECURE
                   ? $r('app.media.address_secure_lock')
                   : $r('app.media.address_insecure_lock'))
-                  .width(20)
-                  .height(20)
+                  .width(this.downloadRingProps().lockImageSize)
+                  .height(this.downloadRingProps().lockImageSize)
                   .position({
-                    x: 6,
-                    y: addressLockImageVerticalOffsetFor(32, 20)
+                    x: this.downloadRingProps().lockImageOffsetX,
+                    y: addressLockImageVerticalOffsetFor(
+                      this.downloadRingProps().buttonSize,
+                      this.downloadRingProps().lockImageSize
+                    )
                   });
               }
-                .width(32)
-                .height(32);
+                .width(this.downloadRingProps().buttonSize)
+                .height(this.downloadRingProps().buttonSize);
             }
               .id('browser-page-menu-button')
-              .width(32)
-              .height(32)
+              .width(this.downloadRingProps().buttonSize)
+              .height(this.downloadRingProps().buttonSize)
               .padding(0)
               .backgroundColor(Color.Transparent)
               .stateEffect(false)
               .align(Alignment.TopStart)
               .position({ x: 0, y: addressLockVerticalOffsetFor(
                 ADDRESS_SEARCH_BAR_STYLE.height,
-                32
+                this.downloadRingProps().buttonSize
               ) })
               .zIndex(1)
               .onClick(() => this.pageMenuShown = true)

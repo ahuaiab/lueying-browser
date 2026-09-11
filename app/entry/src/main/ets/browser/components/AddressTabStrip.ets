@@ -31,7 +31,19 @@ import {
 import { addressTextColorFor } from '../model/BrowserInteraction';
 import { TabPreviewKind } from '../model/TabGestureMotion';
 import { DownloadProgressSnapshot } from '../model/DownloadModels';
-import { AddressSearchBar } from './AddressSearchBar';
+import {
+  AddressSearchBar,
+  AddressSearchBarDownloadProps,
+  addressSearchBarDownloadProps
+} from './AddressSearchBar';
+
+export function addressTabStripDownloadSnapshotForItem(
+  snapshot: DownloadProgressSnapshot | undefined,
+  index: number,
+  activeIndex: number
+): DownloadProgressSnapshot | undefined {
+  return index === activeIndex ? snapshot : undefined;
+}
 
 @ComponentV2
 export struct AddressTabStrip {
@@ -237,8 +249,12 @@ export struct AddressTabStrip {
       readerMode: this.readerMode,
       webReady: index === this.activeIndex && this.webReady,
       desktopMode: index === this.activeIndex && this.desktopMode,
-      downloadActive: index === this.activeIndex && this.downloadProgress !== undefined,
-      downloadProgress: index === this.activeIndex ? this.downloadProgress?.percent ?? 0 : 0,
+      downloadActive: addressSearchBarDownloadProps(
+        addressTabStripDownloadSnapshotForItem(this.downloadProgress, index, this.activeIndex)
+      ).downloadActive,
+      downloadProgress: addressSearchBarDownloadProps(
+        addressTabStripDownloadSnapshotForItem(this.downloadProgress, index, this.activeIndex)
+      ).downloadProgress,
       onNavigate: index === this.activeIndex ? this.onAddressSubmit : (_value: string) => undefined,
       onFontSize: index === this.activeIndex ? this.onFontSize : (_size: PageFontSize) => undefined,
       onPageAction: index === this.activeIndex ? this.onPageAction : (_action: PageAction) => undefined,

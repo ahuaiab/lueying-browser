@@ -13,6 +13,12 @@ import {
   SAFARI_BOTTOM_CHROME_RADIUS_VP
 } from '../model/BrowserVisualMetrics';
 
+export function bottomBrowserBarDownloadSnapshot(
+  snapshot: DownloadProgressSnapshot | undefined
+): DownloadProgressSnapshot | undefined {
+  return snapshot;
+}
+
 @ComponentV2
 export struct BottomBrowserBar {
   @Param tabs: BrowserTabRecord[] = [];
@@ -101,7 +107,7 @@ export struct BottomBrowserBar {
           addressInputFocusEnabled: this.addressInputFocusEnabled,
           inputFocusRequestToken: this.inputFocusRequestToken, selectedFontSize: this.selectedFontSize,
           readerMode: this.readerMode, webReady: this.webReady, desktopMode: this.desktopMode,
-          downloadProgress: this.downloadProgress,
+          downloadProgress: bottomBrowserBarDownloadSnapshot(this.downloadProgress),
           onNavigate: this.onNavigate, onReload: this.onReload, onOpenAddress: this.onOpenAddress,
           onAddressChange: this.onAddressChange, onInputFocusChange: this.onInputFocusChange,
           onAddressSubmit: this.onAddressSubmit,
