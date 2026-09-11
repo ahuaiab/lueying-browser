@@ -12,7 +12,8 @@ import {
   DownloadManagerActionKind,
   downloadManagerActionKindFor,
   downloadManagerProgressLabel,
-  downloadManagerStatusLabel,
+  downloadManagerDetailLabel,
+  downloadManagerSubtitleLabel,
   downloadManagerTaskId
 } from '../../../main/ets/browser/components/DownloadManagerSheet';
 
@@ -49,7 +50,6 @@ export default function downloadManagerUiTest() {
     });
 
     it('maps active and unknown-size tasks to readable progress', 0, () => {
-      expect(downloadManagerStatusLabel(DownloadStatus.RUNNING)).assertEqual('正在下载');
       expect(downloadManagerProgressLabel(task(DownloadStatus.RUNNING, 25))).assertEqual('25%');
       expect(downloadManagerProgressLabel(task(DownloadStatus.RUNNING, -1))).assertEqual('正在下载');
       expect(downloadManagerActionKindFor(DownloadStatus.RUNNING)).assertEqual(
@@ -60,10 +60,15 @@ export default function downloadManagerUiTest() {
       );
     });
 
+    it('keeps task rows free of duplicate status and backend hints', 0, () => {
+      expect(downloadManagerSubtitleLabel(DownloadStatus.RUNNING)).assertEqual('');
+      expect(downloadManagerSubtitleLabel(DownloadStatus.CANCELLED)).assertEqual('');
+      expect(downloadManagerDetailLabel(task(DownloadStatus.RUNNING, -1))).assertEqual('');
+      expect(downloadManagerDetailLabel(task(DownloadStatus.CANCELLED, -1))).assertEqual('');
+      expect(downloadManagerProgressLabel(task(DownloadStatus.CANCELLED, -1))).assertEqual('已取消');
+    });
+
     it('maps terminal states to the matching manager actions', 0, () => {
-      expect(downloadManagerStatusLabel(DownloadStatus.COMPLETED)).assertEqual('已完成');
-      expect(downloadManagerStatusLabel(DownloadStatus.FAILED)).assertEqual('下载失败');
-      expect(downloadManagerStatusLabel(DownloadStatus.CANCELLED)).assertEqual('已取消');
       expect(downloadManagerActionKindFor(DownloadStatus.FAILED)).assertEqual(
         DownloadManagerActionKind.RETRY
       );

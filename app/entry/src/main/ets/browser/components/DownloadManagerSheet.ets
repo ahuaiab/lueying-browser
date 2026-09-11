@@ -23,21 +23,10 @@ export function downloadManagerTaskId(id: string): string {
   return `download-task-${id}`;
 }
 
-export function downloadManagerStatusLabel(status: DownloadStatus): string {
-  if (status === DownloadStatus.QUEUED || status === DownloadStatus.HANDOFF_PENDING ||
-    status === DownloadStatus.RUNNING) {
-    return '正在下载';
-  }
-  if (status === DownloadStatus.PAUSED) {
-    return '已暂停';
-  }
-  if (status === DownloadStatus.COMPLETED) {
-    return '已完成';
-  }
-  if (status === DownloadStatus.FAILED) {
-    return '下载失败';
-  }
-  return '已取消';
+export function downloadManagerSubtitleLabel(_status: DownloadStatus): string {
+  // The trailing status is the single status owner in each row. A second
+  // status line under the filename made terminal states appear twice.
+  return '';
 }
 
 export function downloadManagerProgressLabel(task: DownloadTaskRecord): string {
@@ -81,37 +70,10 @@ function downloadManagerProgressValueFor(task: DownloadTaskRecord): number {
   return Math.max(0, Math.min(100, Math.trunc(task.percent)));
 }
 
-function formatDownloadBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${Math.max(0, Math.trunc(bytes))} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function compactError(error: string): string {
-  return error.replace(/\s+/g, ' ').trim().slice(0, 80);
-}
-
-function downloadManagerDetailLabel(task: DownloadTaskRecord): string {
-  if (task.status === DownloadStatus.COMPLETED) {
-    return '已保存到应用下载目录';
-  }
-  if (task.status === DownloadStatus.FAILED && task.error !== undefined && task.error.length > 0) {
-    return compactError(task.error);
-  }
-  if (task.backend === DownloadBackend.ARKWEB) {
-    return task.isPrivate ? '隐私下载仅在应用存活期间继续' : '网页下载；应用退出后不会恢复';
-  }
-  if (task.totalBytes > 0) {
-    return `${formatDownloadBytes(task.receivedBytes)} / ${formatDownloadBytes(task.totalBytes)}`;
-  }
-  return '系统后台下载';
+export function downloadManagerDetailLabel(_task: DownloadTaskRecord): string {
+  // Backend and lifecycle details belong to the implementation, not the
+  // compact row. Keep the row aligned with the existing LibrarySheet style.
+  return '';
 }
 
 @ComponentV2
@@ -245,9 +207,11 @@ export struct DownloadManagerSheet {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%');
-          Text(downloadManagerStatusLabel(task.status))
-            .fontSize(12)
-            .fontColor(task.status === DownloadStatus.FAILED ? '#FF3B30' : '#6B7280');
+          if (downloadManagerSubtitleLabel(task.status).length > 0) {
+            Text(downloadManagerSubtitleLabel(task.status))
+              .fontSize(12)
+              .fontColor(task.status === DownloadStatus.FAILED ? '#FF3B30' : '#6B7280');
+          }
         }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start);
@@ -271,12 +235,14 @@ export struct DownloadManagerSheet {
           .color('#1677FF')
       }
 
-      Text(downloadManagerDetailLabel(task))
-        .fontSize(12)
-        .fontColor('#8A8A90')
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%');
+      if (downloadManagerDetailLabel(task).length > 0) {
+        Text(downloadManagerDetailLabel(task))
+          .fontSize(12)
+          .fontColor('#8A8A90')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%');
+      }
       this.taskActions(task);
       Row()
         .width('100%')
@@ -327,20 +293,8 @@ export struct DownloadManagerSheet {
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor('#1D1D1F')
-            .layoutWeight(1)
+            .width('100%')
             .textAlign(TextAlign.Center);
-          Button({ type: ButtonType.Normal, stateEffect: false }) {
-            Text('×')
-              .fontSize(24)
-              .fontColor('#6B7280');
-          }
-            .id('download-manager-close-button')
-            .width(44)
-            .height(44)
-            .padding(0)
-            .backgroundColor(Color.Transparent)
-            .stateEffect(false)
-            .onClick(() => this.onClose());
         }
           .id('download-manager-header')
           .width(`${LIBRARY_CONTENT_WIDTH_PERCENT}%`)
