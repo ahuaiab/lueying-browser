@@ -7,6 +7,8 @@ import {
 import { selectDownloadProgressForTab } from '../../../main/ets/browser/components/BrowserShell';
 import {
   addressSearchBarDownloadProps,
+  addressLeadingActionVisibleFor,
+  addressInputLeftPaddingFor,
   downloadProgressRingProps
 } from '../../../main/ets/browser/components/AddressSearchBar';
 import {
@@ -165,6 +167,14 @@ export default function downloadProgressUiTest() {
           ringProps.lockImageSize / 2
       );
       expect(ringProps.size - ringProps.strokeWidth * 2 > ringProps.lockImageSize).assertTrue();
+    });
+
+    it('hides the leading icon whenever the address input is focused', 0, () => {
+      expect(addressLeadingActionVisibleFor(false, true)).assertFalse();
+    });
+
+    it('removes the leading inset whenever the address input is focused', 0, () => {
+      expect(addressInputLeftPaddingFor(false, true)).assertEqual(0);
     });
   });
 }
