@@ -1,0 +1,34 @@
+# DevEco / HarmonyOS generated output
+.hvigor/
+.superpowers/
+**/.hvigor/
+**/build/
+**/oh_modules/
+**/node_modules/
+**/.idea/
+**/.codex/
+**/.test/
+
+# Local investigation and verification artifacts
+artifacts/
+diagnosis/
+docs/superpowers/
+
+# Build and signing artifacts
+*.hap
+*.hsp
+*.app
+*.hqf
+*.p12
+*.p7b
+*.cer
+*.key
+*.log
+
+# Local scratch files
+*.tmp
+*.timestamp
+o.timestamp
+x.width
+console.log(i+301+'
+x+1).join('
