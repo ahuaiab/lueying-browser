@@ -269,6 +269,26 @@ export default function downloadServiceTest() {
       expect(setup.service.snapshot()[0].receivedBytes).assertEqual(100);
     });
 
+    it('fails a shown non-terminal task when its callback handle cannot be recovered', 0, async () => {
+      const events: string[] = [];
+      const setup = createService(events);
+      setup.storage.records = [{
+        id: 'web-guid-1', agentTaskId: 'agent-1', reconcileKey: 'web-guid-1', tabId: 'tab-1',
+        url: 'https://example.com/archive.zip', filename: 'archive.zip', backend: 'request-agent',
+        status: 'running', receivedBytes: 2, totalBytes: 100, percent: 2, createdAt: 1, updatedAt: 1,
+        isPrivate: false
+      } as DownloadTaskRecord];
+      setup.agent.showSnapshot = {
+        taskId: 'agent-1', status: AgentTaskStatus.RUNNING, receivedBytes: 20, totalBytes: 100, percent: 20
+      };
+
+      await setup.service.restore();
+
+      expect(setup.agent.showCalls).assertEqual(1);
+      expect(setup.service.snapshot()[0].status).assertEqual('failed');
+      expect((setup.service.snapshot()[0].error ?? '').length > 0).assertTrue();
+    });
+
     it('keeps the agent backend when ArkWeb cancellation throws after handoff', 0, async () => {
       const events: string[] = [];
       const setup = createService(events);

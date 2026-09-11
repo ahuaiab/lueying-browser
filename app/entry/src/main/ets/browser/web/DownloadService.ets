@@ -61,7 +61,6 @@ export class DownloadService implements WebDownloadHandler {
     await this.store.restore();
     const tasks: DownloadTaskRecord[] = this.store.snapshot();
     const recoveredHandles: Map<string, AgentTaskHandle> = new Map();
-    const knownAgentTasks: Set<string> = new Set();
     for (const task of tasks) {
       if (task.backend === DownloadBackend.REQUEST_AGENT && task.agentTaskId.length > 0) {
         let handle: AgentTaskHandle | undefined = undefined;
@@ -80,21 +79,17 @@ export class DownloadService implements WebDownloadHandler {
           shown = undefined;
         }
         if (shown !== undefined) {
-          knownAgentTasks.add(task.id);
           this.mergeAgentSnapshot(task, shown);
         }
       }
     }
 
     const discovered: AgentTaskSnapshot[] = await this.agent.searchByPrefix('jianyue-download:');
-    const discoveredIds: Set<string> = new Set();
     for (const snapshot of discovered) {
       const matching: DownloadTaskRecord | undefined = this.findRecoveredTask(snapshot);
       if (matching === undefined) {
         continue;
       }
-      knownAgentTasks.add(matching.id);
-      discoveredIds.add(matching.id);
       this.mergeAgentSnapshot(matching, snapshot);
     }
 
@@ -105,7 +100,7 @@ export class DownloadService implements WebDownloadHandler {
       const handle: AgentTaskHandle | undefined = recoveredHandles.get(task.id);
       if (handle !== undefined) {
         this.attachAgentHandle(task.id, handle);
-      } else if (!knownAgentTasks.has(task.id) && !discoveredIds.has(task.id)) {
+      } else {
         this.store.transition(task.id, DownloadStatus.FAILED, {
           error: '后台下载任务不可用；请重试。'
         });
