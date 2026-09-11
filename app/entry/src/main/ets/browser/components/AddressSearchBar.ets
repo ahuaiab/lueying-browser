@@ -298,6 +298,13 @@ export struct AddressSearchBar {
   @Builder
   private pageMenu() {
     Menu() {
+      MenuItem({ content: '下载管理' })
+        .id('browser-download-manager-menu-item')
+        .onChange((selected: boolean) => {
+          if (selected) {
+            this.runPageAction(PageAction.DOWNLOAD_MANAGER);
+          }
+        })
       MenuItem({
         content: pageModeMenuLabel(this.desktopMode),
         symbolStartIcon: this.pageModeMenuSymbol()

@@ -11,6 +11,7 @@ import { AddressTabStrip } from './AddressTabStrip';
 import { BottomBrowserBar } from './BottomBrowserBar';
 import { GestureLab } from './GestureLab';
 import { LibrarySheet } from './LibrarySheet';
+import { DownloadManagerSheet } from './DownloadManagerSheet';
 import { StartPage } from './StartPage';
 import { StartPageCustomizeSheet } from './StartPageCustomizeSheet';
 import { BrowserTransitionScene } from './BrowserTransitionScene';
@@ -2789,6 +2790,10 @@ export struct BrowserShell {
   }
 
   private onPageAction(action: PageAction): void {
+    if (action === PageAction.DOWNLOAD_MANAGER) {
+      this.openDownloadManager();
+      return;
+    }
     if (!this.pageActionsReady()) {
       return;
     }
@@ -4907,6 +4912,39 @@ export struct BrowserShell {
         // Keeping it outside BottomBrowserBar prevents the toolbar surface
         // from clipping the shared-page handoff.
         this.buildAddressTransitionLayer();
+
+        if (this.showDownloadManager && this.overviewProgress === 0) {
+          DownloadManagerSheet({
+            tasks: this.downloadTasks,
+            topInset: this.topAvoidInset,
+            bottomInset: this.bottomAvoidInset,
+            onClose: () => this.closeDownloadManager(),
+            onPause: (id: string) => this.pauseDownload(id),
+            onResume: (id: string) => this.resumeDownload(id),
+            onCancel: (id: string) => this.cancelDownload(id),
+            onRetry: (id: string) => this.retryDownload(id)
+          })
+            .align(Alignment.Bottom)
+            // The address transition layer is intentionally above the normal
+            // bottom chrome at z=40; the modal manager must cover that layer.
+            .zIndex(50)
+            .transition(
+              TransitionEffect.asymmetric(
+                TransitionEffect.move(TransitionEdge.BOTTOM)
+                  .combine(TransitionEffect.OPACITY)
+                  .animation({ curve: curves.springMotion() }),
+                TransitionEffect.move(TransitionEdge.BOTTOM)
+                  .combine(TransitionEffect.OPACITY)
+                  .animation({
+                    curve: curves.springMotion(
+                      START_PAGE_CUSTOMIZE_DISMISS_SPRING_RESPONSE,
+                      START_PAGE_CUSTOMIZE_DISMISS_SPRING_DAMPING,
+                      START_PAGE_CUSTOMIZE_DISMISS_SPRING_OVERLAP
+                    )
+                  })
+              )
+            );
+        }
 
         if (this.showLibrary && !this.showDownloadManager && this.overviewProgress === 0) {
           LibrarySheet({

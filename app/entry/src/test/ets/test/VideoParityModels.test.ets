@@ -416,20 +416,24 @@ export default function videoParityModelsTest() {
       expect((await repository.loadClosedTabs()).length).assertEqual(0);
     });
 
-    it('exposes only the page-mode action in the long-press page menu', 0, () => {
+    it('keeps download management beside the page-mode action in the long-press menu', 0, () => {
       expect(nextFontSize(PageFontSize.SMALL)).assertEqual(PageFontSize.STANDARD);
       expect(nextFontSize(PageFontSize.STANDARD)).assertEqual(PageFontSize.LARGE);
       expect(nextFontSize(PageFontSize.LARGE)).assertEqual(PageFontSize.SMALL);
       const ready: PageActionAvailability = availablePageActions(true);
-      expect(ready.enabled.length).assertEqual(1);
+      expect(ready.enabled.length).assertEqual(2);
+      expect(ready.enabled.includes(PageAction.DOWNLOAD_MANAGER)).assertTrue();
       expect(ready.enabled.includes(PageAction.DESKTOP_SITE)).assertTrue();
       expect(ready.enabled.includes(PageAction.SCREENSHOT)).assertFalse();
       expect(ready.enabled.includes(PageAction.BOOKMARK)).assertFalse();
       expect(ready.enabled.includes(PageAction.MEDIA_SPEED_DOUBLE)).assertFalse();
-      expect(pageMenuActions(true).length).assertEqual(1);
-      expect(pageMenuActions(true)[0]).assertEqual(PageAction.DESKTOP_SITE);
+      expect(pageMenuActions(true).length).assertEqual(2);
+      expect(pageMenuActions(true)[0]).assertEqual(PageAction.DOWNLOAD_MANAGER);
+      expect(pageMenuActions(true)[1]).assertEqual(PageAction.DESKTOP_SITE);
       const unavailable: PageActionAvailability = availablePageActions(false);
-      expect(pageMenuActions(false).length).assertEqual(0);
+      expect(pageMenuActions(false).length).assertEqual(1);
+      expect(pageMenuActions(false)[0]).assertEqual(PageAction.DOWNLOAD_MANAGER);
+      expect(unavailable.enabled.includes(PageAction.DOWNLOAD_MANAGER)).assertTrue();
       expect(unavailable.enabled.includes(PageAction.SCREENSHOT)).assertFalse();
       expect(unavailable.reason.length > 0).assertTrue();
       expect(pageModeMenuLabel(false)).assertEqual('请求桌面网页');

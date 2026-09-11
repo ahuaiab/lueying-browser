@@ -5,6 +5,7 @@ export enum PageAction {
   TRANSLATE = 'translate',
   SCREENSHOT = 'screenshot',
   BOOKMARK = 'bookmark',
+  DOWNLOAD_MANAGER = 'download_manager',
   DESKTOP_SITE = 'desktop_site',
   MEDIA_SPEED_HALF = 'media_speed_half',
   MEDIA_SPEED_STANDARD = 'media_speed_standard',
@@ -17,9 +18,11 @@ export interface PageActionAvailability {
   reason: string;
 }
 
-/** Only the page-mode toggle remains in the long-press page menu. */
+/** The download manager stays available while a page is still loading. */
 export function pageMenuActions(webReady: boolean): PageAction[] {
-  return webReady ? [PageAction.DESKTOP_SITE] : [];
+  return webReady
+    ? [PageAction.DOWNLOAD_MANAGER, PageAction.DESKTOP_SITE]
+    : [PageAction.DOWNLOAD_MANAGER];
 }
 
 export function nextFontSize(size: PageFontSize): PageFontSize {
@@ -40,7 +43,7 @@ export function nextFontSize(size: PageFontSize): PageFontSize {
 export function availablePageActions(webReady: boolean): PageActionAvailability {
   if (!webReady) {
     return {
-      enabled: [],
+      enabled: [PageAction.DOWNLOAD_MANAGER],
       reason: '网页尚未完成加载，暂时不能执行页面操作'
     };
   }

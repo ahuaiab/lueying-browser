@@ -18,6 +18,7 @@ import downloadAgentPortsTest from './ets/test/DownloadAgentPorts.test';
 import downloadServiceTest from './ets/test/DownloadService.test';
 import browserDownloadLifecycleTest from './ets/test/BrowserDownloadLifecycle.test';
 import downloadProgressUiTest from './ets/test/DownloadProgressUi.test';
+import downloadManagerUiTest from './ets/test/DownloadManagerUi.test';
 
 export default function testsuite() {
   tabStoreTest();
@@ -40,4 +41,5 @@ export default function testsuite() {
   downloadServiceTest();
   browserDownloadLifecycleTest();
   downloadProgressUiTest();
+  downloadManagerUiTest();
 }
