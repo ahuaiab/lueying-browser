@@ -13,6 +13,7 @@ import touchOwnershipTest from './ets/test/TouchOwnership.test';
 import safariTabTransitionTest from './ets/test/SafariTabTransition.test';
 import browserInteractionTest from './ets/test/BrowserInteraction.test';
 import tabOverviewTransitionTest from './ets/test/TabOverviewTransition.test';
+import downloadModelsTest from './ets/test/DownloadModels.test';
 
 export default function testsuite() {
   tabStoreTest();
@@ -30,4 +31,5 @@ export default function testsuite() {
   safariTabTransitionTest();
   browserInteractionTest();
   tabOverviewTransitionTest();
+  downloadModelsTest();
 }
