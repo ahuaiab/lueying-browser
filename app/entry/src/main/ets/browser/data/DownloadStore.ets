@@ -66,10 +66,14 @@ export class DownloadStore {
   }
 
   mergeRecovered(task: DownloadTaskRecord, persist: boolean = true): void {
-    const existing: DownloadTaskRecord | undefined = this.records.find(
-      (candidate: DownloadTaskRecord) => candidate.agentTaskId === task.agentTaskId ||
-        candidate.reconcileKey === task.reconcileKey
-    );
+    const hasAgentTaskId: boolean = task.agentTaskId.trim().length > 0;
+    const agentMatch: DownloadTaskRecord | undefined = hasAgentTaskId
+      ? this.records.find((candidate: DownloadTaskRecord) => candidate.agentTaskId === task.agentTaskId)
+      : undefined;
+    const existing: DownloadTaskRecord | undefined = agentMatch ??
+      (task.reconcileKey.trim().length > 0
+        ? this.records.find((candidate: DownloadTaskRecord) => candidate.reconcileKey === task.reconcileKey)
+        : undefined);
     if (existing === undefined) {
       this.records.push(this.copy(task));
     } else if (task.updatedAt > existing.updatedAt) {

@@ -75,6 +75,43 @@ export default function downloadModelsTest() {
       expect(store.snapshot()[0].receivedBytes).assertEqual(50);
     });
 
+    it('falls back to reconcile key when no agent task id matches', 0, () => {
+      const store = new DownloadStore(new MemoryDownloadStorage(), () => 30);
+      const existing: DownloadTaskRecord = record('existing', 10);
+      existing.agentTaskId = 'agent-existing';
+      existing.reconcileKey = 'shared-key';
+      store.begin(existing);
+      const recovered: DownloadTaskRecord = record('recovered', 20);
+      recovered.agentTaskId = 'agent-recovered';
+      recovered.reconcileKey = 'shared-key';
+      recovered.receivedBytes = 60;
+      store.mergeRecovered(recovered);
+      expect(store.snapshot().length).assertEqual(1);
+      expect(store.snapshot()[0].id).assertEqual('recovered');
+      expect(store.snapshot()[0].receivedBytes).assertEqual(60);
+    });
+
+    it('prioritizes agent task id over a conflicting reconcile key match', 0, () => {
+      const store = new DownloadStore(new MemoryDownloadStorage(), () => 40);
+      const staleKeyRecord: DownloadTaskRecord = record('stale-key', 10);
+      staleKeyRecord.agentTaskId = 'agent-stale';
+      staleKeyRecord.reconcileKey = 'target-key';
+      store.begin(staleKeyRecord);
+      const agentRecord: DownloadTaskRecord = record('agent-match', 15);
+      agentRecord.agentTaskId = 'agent-target';
+      agentRecord.reconcileKey = 'other-key';
+      store.begin(agentRecord);
+      const recovered: DownloadTaskRecord = record('recovered', 20);
+      recovered.agentTaskId = 'agent-target';
+      recovered.reconcileKey = 'target-key';
+      recovered.receivedBytes = 75;
+      store.mergeRecovered(recovered);
+      expect(store.snapshot().length).assertEqual(2);
+      expect(store.snapshot()[0].receivedBytes).assertEqual(0);
+      expect(store.snapshot()[1].id).assertEqual('recovered');
+      expect(store.snapshot()[1].receivedBytes).assertEqual(75);
+    });
+
     it('returns the newest active task for a tab', 0, () => {
       const store = new DownloadStore(new MemoryDownloadStorage(), () => 30);
       store.begin(record('old', 10));
