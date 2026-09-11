@@ -313,7 +313,7 @@ export struct GestureLab {
       .width('100%')
 
       Row() {
-        Text(`简阅 · ${this.store.tabs.length} 个标签`)
+        Text(`简悦 · ${this.store.tabs.length} 个标签`)
           .fontSize(14)
           .fontColor(Color.White)
           .layoutWeight(1)

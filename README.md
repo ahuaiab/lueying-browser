@@ -1,6 +1,6 @@
 # jianyue-browser
 
-简阅浏览器是一款基于 HarmonyOS 原生 ArkUI / ArkWeb 的移动端浏览器。
+简悦浏览器是一款基于 HarmonyOS 原生 ArkUI / ArkWeb 的移动端浏览器。
 
 ## 从源码构建 HAP
 
