@@ -222,6 +222,34 @@ export interface BrowserDownloadServicePort {
   clearListener(listener: (tasks: DownloadTaskRecord[]) => void): void;
 }
 
+/** Selects the one read-only download indicator owned by an address tab. */
+export function selectDownloadProgressForTab(
+  tasks: DownloadTaskRecord[],
+  tabId: string
+): DownloadProgressSnapshot | undefined {
+  const active: DownloadTaskRecord[] = tasks.filter((task: DownloadTaskRecord): boolean =>
+    task.tabId === tabId && task.status !== DownloadStatus.COMPLETED &&
+    task.status !== DownloadStatus.FAILED && task.status !== DownloadStatus.CANCELLED
+  );
+  if (active.length === 0) {
+    return undefined;
+  }
+  const newest: DownloadTaskRecord = active.reduce(
+    (current: DownloadTaskRecord, task: DownloadTaskRecord): DownloadTaskRecord =>
+      task.updatedAt > current.updatedAt ? task : current
+  );
+  return {
+    id: newest.id,
+    tabId: newest.tabId,
+    status: newest.status,
+    receivedBytes: newest.receivedBytes,
+    totalBytes: newest.totalBytes,
+    percent: newest.percent,
+    filename: newest.filename,
+    url: newest.url
+  };
+}
+
 class DownloadServiceLifecyclePort implements BrowserDownloadServicePort {
   private readonly service: DownloadService;
 
@@ -1178,27 +1206,7 @@ export struct BrowserShell {
   }
 
   private downloadProgressForTab(tabId: TabId): DownloadProgressSnapshot | undefined {
-    const active: DownloadTaskRecord[] = this.downloadTasks.filter((task: DownloadTaskRecord): boolean =>
-      task.tabId === tabId && task.status !== DownloadStatus.COMPLETED &&
-      task.status !== DownloadStatus.FAILED && task.status !== DownloadStatus.CANCELLED
-    );
-    if (active.length === 0) {
-      return undefined;
-    }
-    const newest: DownloadTaskRecord = active.reduce(
-      (current: DownloadTaskRecord, task: DownloadTaskRecord): DownloadTaskRecord =>
-        task.updatedAt > current.updatedAt ? task : current
-    );
-    return {
-      id: newest.id,
-      tabId: newest.tabId,
-      status: newest.status,
-      receivedBytes: newest.receivedBytes,
-      totalBytes: newest.totalBytes,
-      percent: newest.percent,
-      filename: newest.filename,
-      url: newest.url
-    };
+    return selectDownloadProgressForTab(this.downloadTasks, tabId);
   }
 
   private openDownloadManager(): void {
@@ -4621,6 +4629,7 @@ export struct BrowserShell {
         readerMode: this.pageDisplayState.readerMode,
         webReady: this.pageActionsReady(),
         desktopMode: this.desktopModeByTab.get(this.sceneActiveTabId) ?? false,
+        downloadProgress: this.downloadProgressForTab(this.sceneActiveTabId),
         overviewTransitionActive: this.overviewProgress > 0 || this.overviewClosing ||
           this.overviewAnimationClosing,
         overviewChromeFrame: this.overviewChromeFrameForRender(),
@@ -4771,6 +4780,7 @@ export struct BrowserShell {
               newTabProgress: this.newTabProgress,
               addressHandoffMounted: this.addressHandoffActive,
               addressHandoffProgress: this.addressHandoffProgress,
+              downloadProgress: this.downloadProgressForTab(this.sceneActiveTabId),
               renderAddress: false,
               gestureState: String(this.gestureState),
               onOpenAddress: () => this.openAddressEditor(),

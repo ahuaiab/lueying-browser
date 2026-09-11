@@ -46,6 +46,9 @@ export struct AddressSearchBar {
   @Param readerMode: boolean = false;
   @Param webReady: boolean = false;
   @Param desktopMode: boolean = false;
+  @Param downloadActive: boolean = false;
+  /** -1 represents a running download with no known total size. */
+  @Param downloadProgress: number = 0;
   @Param onNavigate: (value: string) => void = (_value: string) => undefined;
   @Param onOpenAddress: () => void = () => undefined;
   @Param onAddressCancel: () => void = () => undefined;
@@ -256,6 +259,24 @@ export struct AddressSearchBar {
           if (!this.isStartPage()) {
             Button({ type: ButtonType.Normal, stateEffect: false }) {
               Stack({ alignContent: Alignment.TopStart }) {
+                if (this.downloadActive) {
+                  Progress({
+                    value: this.downloadProgress < 0 ? 0 : this.downloadProgress,
+                    total: 100,
+                    type: ProgressType.Ring
+                  })
+                    .id(`browser-download-progress-ring-${this.inputIdentity}`)
+                    .width(28)
+                    .height(28)
+                    .position({ x: 2, y: 2 })
+                    .color('#1677FF')
+                    .style({
+                      strokeWidth: 2,
+                      status: this.downloadProgress < 0
+                        ? ProgressStatus.LOADING
+                        : ProgressStatus.PROGRESSING
+                    });
+                }
                 Image(addressSecurityStateFor(this.address) === AddressSecurityState.SECURE
                   ? $r('app.media.address_secure_lock')
                   : $r('app.media.address_insecure_lock'))

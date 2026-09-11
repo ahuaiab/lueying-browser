@@ -2,6 +2,7 @@ import { PageAction } from '../model/PageActions';
 import { PageFontSize } from '../model/PageDisplayState';
 import { uiMaterial } from '@kit.ArkUI';
 import { BrowserTabRecord, PendingTabDraft } from '../model/BrowserTypes';
+import { DownloadProgressSnapshot } from '../model/DownloadModels';
 import { TabPreviewKind } from '../model/TabGestureMotion';
 import { TouchOwner } from '../gesture/TouchOwnership';
 import { AddressTabStrip } from './AddressTabStrip';
@@ -45,6 +46,7 @@ export struct BottomBrowserBar {
   @Param newTabProgress: number = 0;
   @Param addressHandoffMounted: boolean = false;
   @Param addressHandoffProgress: number = 1;
+  @Param downloadProgress: DownloadProgressSnapshot | undefined = undefined;
   /** BrowserShell renders the shared address strip above this surface. */
   @Param renderAddress: boolean = true;
   @Param gestureState: string = 'idle';
@@ -99,6 +101,7 @@ export struct BottomBrowserBar {
           addressInputFocusEnabled: this.addressInputFocusEnabled,
           inputFocusRequestToken: this.inputFocusRequestToken, selectedFontSize: this.selectedFontSize,
           readerMode: this.readerMode, webReady: this.webReady, desktopMode: this.desktopMode,
+          downloadProgress: this.downloadProgress,
           onNavigate: this.onNavigate, onReload: this.onReload, onOpenAddress: this.onOpenAddress,
           onAddressChange: this.onAddressChange, onInputFocusChange: this.onInputFocusChange,
           onAddressSubmit: this.onAddressSubmit,

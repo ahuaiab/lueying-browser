@@ -30,6 +30,7 @@ import {
 } from '../model/SafariTabTransition';
 import { addressTextColorFor } from '../model/BrowserInteraction';
 import { TabPreviewKind } from '../model/TabGestureMotion';
+import { DownloadProgressSnapshot } from '../model/DownloadModels';
 import { AddressSearchBar } from './AddressSearchBar';
 
 @ComponentV2
@@ -55,6 +56,7 @@ export struct AddressTabStrip {
   @Param newTabProgress: number = 0;
   @Param addressHandoffMounted: boolean = false;
   @Param addressHandoffProgress: number = 1;
+  @Param downloadProgress: DownloadProgressSnapshot | undefined = undefined;
   /** Shared page/chrome frame used while the address capsule leaves the bar. */
   @Param overviewTransitionActive: boolean = false;
   @Param overviewChromeFrame: TabOverviewChromeFrame | undefined = undefined;
@@ -235,6 +237,8 @@ export struct AddressTabStrip {
       readerMode: this.readerMode,
       webReady: index === this.activeIndex && this.webReady,
       desktopMode: index === this.activeIndex && this.desktopMode,
+      downloadActive: index === this.activeIndex && this.downloadProgress !== undefined,
+      downloadProgress: index === this.activeIndex ? this.downloadProgress?.percent ?? 0 : 0,
       onNavigate: index === this.activeIndex ? this.onAddressSubmit : (_value: string) => undefined,
       onFontSize: index === this.activeIndex ? this.onFontSize : (_size: PageFontSize) => undefined,
       onPageAction: index === this.activeIndex ? this.onPageAction : (_action: PageAction) => undefined,
