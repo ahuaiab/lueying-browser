@@ -164,6 +164,10 @@ export struct AddressTabStrip {
     return newTabPreviewVisual(this.newTabProgress).addressPlusOpacity;
   }
 
+  private addressBackgroundOpacity(): number {
+    return newTabPreviewVisual(this.newTabProgress).addressBackgroundOpacity;
+  }
+
   private handoffPlusOpacity(): number {
     return this.handoffUsesPendingSlot()
       ? 0
@@ -305,6 +309,12 @@ export struct AddressTabStrip {
       if (!this.overviewTransitionActive && this.pendingTab !== undefined && shouldRenderPendingTabPreview(
         this.previewKind, this.newTabProgress)) {
         Stack({ alignContent: Alignment.Center }) {
+          Column() {
+          }
+            .width('100%')
+            .height('100%')
+            .backgroundColor(Color.White)
+            .opacity(this.addressBackgroundOpacity());
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize(26)
             .fontColor(['#1677FF'])
@@ -314,7 +324,7 @@ export struct AddressTabStrip {
           .width(this.itemWidth())
           .height(ADDRESS_SEARCH_BAR_STYLE.height)
           .position({ x: this.itemOffset(this.tabs.length), y: ADDRESS_SEARCH_BAR_TOP_PADDING })
-          .backgroundColor(Color.White)
+          .backgroundColor(Color.Transparent)
           .borderRadius(ADDRESS_SEARCH_BAR_STYLE.cornerRadius)
           .hitTestBehavior(HitTestMode.None);
       }

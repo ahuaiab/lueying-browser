@@ -15,7 +15,9 @@ import {
 import {
   TAB_OVERVIEW_CAPTION_FONT_SIZE,
   TabOverviewPageFrame,
-  tabOverviewCaptionLocalRadius
+  tabOverviewCaptionLocalRadius,
+  TabOverviewLivePageCloseFrame,
+  tabOverviewLivePageCloseFrame
 } from '../model/TabOverviewActions';
 import { WebNodeHostController } from '../web/WebTabNode';
 import { availableContentHeight } from '../model/WindowAvoidance';
@@ -45,6 +47,9 @@ export struct BrowserTransitionScene {
   @Param showPreview: boolean = false;
   /** The live page itself is transformed into the active overview card. */
   @Param overviewFrame: TabOverviewPageFrame | undefined = undefined;
+  /** Horizontal close progress shared with the active transparent card shell. */
+  @Param overviewCloseProgress: number = 0;
+  @Param overviewCloseHorizontalOffset: number = 0;
   /** Title rendered inside the same transformed layer as the live page. */
   @Param overviewCaptionTitle: string = '';
   /** The shared address capsule owns the caption while the card expands back. */
@@ -130,6 +135,30 @@ export struct BrowserTransitionScene {
 
   private overviewCaptionRadius(): number {
     return tabOverviewCaptionLocalRadius(this.overviewFrame);
+  }
+
+  private livePageCloseFrame(): TabOverviewLivePageCloseFrame {
+    return tabOverviewLivePageCloseFrame(
+      this.overviewCloseProgress,
+      this.overviewCloseHorizontalOffset
+    );
+  }
+
+  private livePageCloseTranslateX(): number {
+    const frame: TabOverviewLivePageCloseFrame = this.livePageCloseFrame();
+    const clipLeft: number = this.overviewFrame?.clipLeft ?? 0;
+    const clipWidth: number = this.overviewFrame?.clipWidth ?? this.sceneWidth();
+    const liveCenterX: number = clipLeft + clipWidth / 2;
+    return frame.horizontalOffset + (1 - frame.scale) *
+      (liveCenterX - this.sceneWidth() / 2);
+  }
+
+  private livePageCloseTranslateY(): number {
+    const frame: TabOverviewLivePageCloseFrame = this.livePageCloseFrame();
+    const clipTop: number = this.overviewFrame?.clipTop ?? 0;
+    const clipHeight: number = this.overviewFrame?.clipHeight ?? this.sceneHeight();
+    const liveCenterY: number = clipTop + clipHeight / 2;
+    return (1 - frame.scale) * (liveCenterY - this.sceneHeight() / 2);
   }
 
   private hasCurrentContent(): boolean {
@@ -346,7 +375,22 @@ export struct BrowserTransitionScene {
       // ArkUI's native shape clip keeps the WebView's original layout
       // viewport unconstrained while cropping only the visible card window.
       .clipShape(this.overviewClipShape())
-      .backgroundColor(Color.White);
+      .backgroundColor(Color.White)
+      // The transparent active card shell and the live page must leave the
+      // overview together. Compensate for the full-window transform origin so
+      // the live page scales around the active card's center, just like the
+      // card shell does.
+      .opacity(this.livePageCloseFrame().opacity)
+      .scale({
+        x: this.livePageCloseFrame().scale,
+        y: this.livePageCloseFrame().scale,
+        z: 1
+      })
+      .translate({
+        x: this.livePageCloseTranslateX(),
+        y: this.livePageCloseTranslateY(),
+        z: 0
+      });
   }
 
   build() {

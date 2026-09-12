@@ -13,6 +13,8 @@ import {
   TAB_OVERVIEW_LAYOUT,
   TAB_OVERVIEW_CAPTION_FONT_SIZE,
   tabOverviewCardCaptionVisualOpacity,
+  tabOverviewLivePageCloseFrame,
+  TabOverviewLivePageCloseFrame,
   tabCardMenuItemIsDestructive
 } from '../model/TabOverviewActions';
 import { DEFAULT_GESTURE_PROFILE } from '../gesture/GestureProfile';
@@ -214,6 +216,15 @@ export struct TabCard {
     return tabOverviewTitleFor(lastValidUrlForTab(this.tab), this.tab.title);
   }
 
+  private closeFrame(): TabOverviewLivePageCloseFrame {
+    return tabOverviewLivePageCloseFrame(this.closeProgress, this.horizontalOffset);
+  }
+
+  private closeScale(): number {
+    const frame: TabOverviewLivePageCloseFrame = this.closeFrame();
+    return this.reorderActive ? frame.scale + 0.04 : frame.scale;
+  }
+
   @Builder
   private pagePreview() {
     if (this.livePreview) {
@@ -356,14 +367,14 @@ export struct TabCard {
       .id(`tab-card-${this.tab.id}`)
       .width('100%')
       .height(this.cardHeight)
-      .opacity(Math.max(0.05, 1 - 0.95 * this.closeProgress))
+      .opacity(this.closeFrame().opacity)
       .scale({
-        x: (this.reorderActive ? 1.04 : 1) - 0.06 * this.closeProgress,
-        y: (this.reorderActive ? 1.04 : 1) - 0.06 * this.closeProgress,
+        x: this.closeScale(),
+        y: this.closeScale(),
         z: 1
       })
       .translate({
-        x: this.horizontalOffset,
+        x: this.closeFrame().horizontalOffset,
         y: this.topOffset + this.verticalOffset + (this.reorderActive ? this.reorderOffsetY : 0),
         z: 0
       })

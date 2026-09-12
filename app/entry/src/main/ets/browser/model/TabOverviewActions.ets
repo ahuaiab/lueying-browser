@@ -219,6 +219,29 @@ export function tabOverviewCardCaptionVisualOpacity(livePreview: boolean): numbe
 }
 
 /**
+ * The active live page and its transparent card shell share this close track.
+ * Keeping the scalar values here prevents the shell from moving ahead while
+ * the page stays behind it during a horizontal close gesture.
+ */
+export interface TabOverviewLivePageCloseFrame {
+  horizontalOffset: number;
+  scale: number;
+  opacity: number;
+}
+
+export function tabOverviewLivePageCloseFrame(
+  progress: number,
+  horizontalOffset: number
+): TabOverviewLivePageCloseFrame {
+  const clampedProgress: number = clampOverviewProgress(progress);
+  return {
+    horizontalOffset: Number.isFinite(horizontalOffset) ? horizontalOffset : 0,
+    scale: 1 - 0.06 * clampedProgress,
+    opacity: Math.max(0.05, 1 - 0.95 * clampedProgress)
+  };
+}
+
+/**
  * The live page and its card shell must never paint the selection ring at the
  * same time.  The live page owns the ring while it is moving or expanding
  * back; the card shell takes ownership only after the overview has settled.

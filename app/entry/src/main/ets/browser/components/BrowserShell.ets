@@ -4575,6 +4575,20 @@ export struct BrowserShell {
     return this.tabStore.activeTabId;
   }
 
+  private overviewCloseProgressForRender(): number {
+    if (this.overviewProgress <= 0) {
+      return 0;
+    }
+    return this.cardProgressFor(this.overviewVisualTabIdForRender());
+  }
+
+  private overviewCloseHorizontalOffsetForRender(): number {
+    if (this.overviewProgress <= 0) {
+      return 0;
+    }
+    return this.cardHorizontalOffsetFor(this.overviewVisualTabIdForRender());
+  }
+
   private overviewPageFrameForRender(): TabOverviewPageFrame {
     return tabOverviewPageFrame(
       this.overviewProgress,
@@ -4709,6 +4723,8 @@ export struct BrowserShell {
             // Progress zero is the identity frame; switching to the card
             // frame must not reparent the ArkWeb NodeContainer.
             overviewFrame: this.overviewPageFrameForRender(),
+            overviewCloseProgress: this.overviewCloseProgressForRender(),
+            overviewCloseHorizontalOffset: this.overviewCloseHorizontalOffsetForRender(),
             overviewCaptionTitle: this.sceneActiveTab === undefined ? '' : tabOverviewTitleFor(
               lastValidUrlForTab(this.sceneActiveTab),
               this.sceneActiveTab.title

@@ -13,6 +13,7 @@ import {
   tabTransitionSceneVisualState
 } from '../../../main/ets/browser/model/SafariTabTransition';
 import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
+import { tabOverviewLivePageCloseFrame } from '../../../main/ets/browser/model/TabOverviewActions';
 
 export default function safariTabTransitionTest() {
   describe('SafariTabTransition', () => {
@@ -88,6 +89,24 @@ export default function safariTabTransitionTest() {
       for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
         expect(newTabPreviewVisual(progress).showPagePlus).assertFalse();
       }
+    });
+
+    it('fades the pending address background in after the plus glyph', 0, () => {
+      const early = newTabPreviewVisual(0.5);
+      const ready = newTabPreviewVisual(1);
+      expect(early.addressBackgroundOpacity).assertEqual(0);
+      expect(ready.addressBackgroundOpacity).assertEqual(1);
+    });
+
+    it('shares the close transform between the active card and live page', 0, () => {
+      const frame = tabOverviewLivePageCloseFrame(0.5, -30);
+      expect(frame.horizontalOffset).assertEqual(-30);
+      expect(frame.scale.toFixed(3)).assertEqual('0.970');
+      expect(frame.opacity.toFixed(3)).assertEqual('0.525');
+      const settled = tabOverviewLivePageCloseFrame(1, -200);
+      expect(settled.horizontalOffset).assertEqual(-200);
+      expect(settled.scale.toFixed(3)).assertEqual('0.940');
+      expect(settled.opacity.toFixed(3)).assertEqual('0.050');
     });
 
     it('keeps stable and pending scene keys unique', 0, () => {

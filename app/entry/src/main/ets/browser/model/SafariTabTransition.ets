@@ -1,4 +1,7 @@
-import { TabPreviewKind } from './TabGestureMotion';
+import {
+  newTabBackgroundProgressForPullProgress,
+  TabPreviewKind
+} from './TabGestureMotion';
 
 export interface SafariTransitionFrame {
   progress: number;
@@ -14,6 +17,7 @@ export interface NewTabPreviewVisual {
   showPagePlus: boolean;
   showAddressPlus: boolean;
   addressPlusOpacity: number;
+  addressBackgroundOpacity: number;
 }
 
 export interface NewTabHandoffVisual {
@@ -153,7 +157,12 @@ export function safariTransitionFrame(dragX: number, pageWidth: number, addressS
 
 export function newTabPreviewVisual(progress: number): NewTabPreviewVisual {
   const normalized: number = Math.max(0, Math.min(1, finite(progress)));
-  return { showPagePlus: false, showAddressPlus: normalized > 0, addressPlusOpacity: normalized };
+  return {
+    showPagePlus: false,
+    showAddressPlus: normalized > 0,
+    addressPlusOpacity: normalized,
+    addressBackgroundOpacity: newTabBackgroundProgressForPullProgress(normalized)
+  };
 }
 
 /**

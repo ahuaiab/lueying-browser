@@ -147,6 +147,20 @@ export function newTabBackgroundProgress(distance: number): number {
     (NEW_TAB_PULL_READY_DISTANCE - NEW_TAB_PLUS_FULL_DISTANCE));
 }
 
+/** Map the normalized pull progress to the same delayed background track. */
+export function newTabBackgroundProgressForPullProgress(progress: number): number {
+  const normalized: number = clamp(finiteOrZero(progress));
+  const start: number = newTabPullProgress(NEW_TAB_PLUS_FULL_DISTANCE);
+  const end: number = newTabPullProgress(NEW_TAB_PULL_READY_DISTANCE);
+  if (normalized <= start) {
+    return 0;
+  }
+  if (end <= start) {
+    return normalized >= end ? 1 : 0;
+  }
+  return clamp((normalized - start) / (end - start));
+}
+
 export function shouldCommitNewTabPull(
   offsetX: number,
   velocityX: number,
