@@ -1,5 +1,9 @@
 import { describe, expect, it } from '@ohos/hypium';
-import { newTabPullProgress, TabPreviewKind } from '../../../main/ets/browser/model/TabGestureMotion';
+import {
+  newTabPullProgress,
+  TabPreviewKind,
+  tabGestureOffsetForRender
+} from '../../../main/ets/browser/model/TabGestureMotion';
 import {
   addressItemLeft,
   addressOffsetForIndex,
@@ -50,6 +54,12 @@ export default function safariTabTransitionTest() {
         false
       );
       expect(settled.showPreview).assertFalse();
+    });
+
+    it('does not render a stale horizontal offset after a gesture settles', 0, () => {
+      expect(tabGestureOffsetForRender(-400, true)).assertEqual(-400);
+      expect(tabGestureOffsetForRender(-400, false)).assertEqual(0);
+      expect(tabGestureOffsetForRender(Number.NaN, true)).assertEqual(0);
     });
 
     it('keeps the new-tab plus in address chrome, never on the page layer', 0, () => {

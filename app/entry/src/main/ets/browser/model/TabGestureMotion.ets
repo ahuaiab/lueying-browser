@@ -266,6 +266,21 @@ export function emptyTabGestureMotion(): TabGestureMotionState {
 }
 
 /**
+ * Return a horizontal offset only while its owning gesture is still active.
+ *
+ * A tab commit can finish asynchronously after the native spring has already
+ * ended. If that commit is interrupted, the state fields may briefly retain
+ * the last exit offset even though the gesture is no longer visible. Keeping
+ * this render boundary here makes every consumer settle back to its origin.
+ */
+export function tabGestureOffsetForRender(offset: number, gestureActive: boolean): number {
+  if (!gestureActive || !Number.isFinite(offset)) {
+    return 0;
+  }
+  return offset;
+}
+
+/**
  * Vertical overview reveal keeps the horizontal address track at its origin.
  * A small diagonal drift from the finger must not be reused by the capsule's
  * tab-spacing calculation while the page is moving upward.

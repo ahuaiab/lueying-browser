@@ -363,8 +363,9 @@ export struct TabOverview {
 
   @Builder
   private bottomToolbar() {
-    // Keep the safe-area reservation in a transparent wrapper, so the
-    // material surface itself can float above the system navigation area.
+    // The live page is mounted as a sibling and is transformed into the
+    // active card. Paint the reserved bottom region so that the part of its
+    // native surface outside the grid cannot show through the toolbar.
     Stack({ alignContent: Alignment.Bottom }) {
       Row() {
         Button({ type: ButtonType.Normal, stateEffect: false }) {
@@ -409,7 +410,8 @@ export struct TabOverview {
       .width('100%')
       .height(60 + Math.max(0, this.bottomInset))
       .padding({ bottom: 8 + Math.max(0, this.bottomInset) })
-      .backgroundColor(Color.Transparent)
+      .backgroundColor(TAB_OVERVIEW_BACKGROUND_COLOR)
+      .clip(true)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
   }
 

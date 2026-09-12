@@ -128,6 +128,7 @@ import {
   TabGestureMotionState,
   tabGestureMotion,
   emptyTabGestureMotion,
+  tabGestureOffsetForRender,
   verticalOverviewGestureMotion,
   TabPreviewKind,
   TabGestureState
@@ -1571,6 +1572,37 @@ export struct BrowserShell {
     }
   }
 
+  private rawDragXForRender(): number {
+    return tabGestureOffsetForRender(this.rawDragX, this.gestureActive);
+  }
+
+  private pageTranslateXForRender(): number {
+    return tabGestureOffsetForRender(this.pageTranslateX, this.gestureActive);
+  }
+
+  private adjacentTranslateXForRender(): number {
+    return tabGestureOffsetForRender(this.adjacentTranslateX, this.gestureActive);
+  }
+
+  /**
+   * Abort a commit that can no longer publish a tab. All transition-owned
+   * layers must return to their identity frame, otherwise the fixed chrome
+   * stays correct while the page layer remains translated off-screen.
+   */
+  private abortAddressTransition(): void {
+    this.addressTransitionToken += 1;
+    this.addressGestureFinished = true;
+    this.addressGestureEngine.cancel();
+    this.addressHandoffAnimationToken += 1;
+    this.addressHandoffAnimator?.finish();
+    this.addressHandoffAnimator = undefined;
+    this.addressHandoffActive = false;
+    this.addressHandoffProgress = 1;
+    this.pendingTabDraft = undefined;
+    this.gestureActive = false;
+    this.resetTabGestureMotion(false);
+  }
+
   private draftForActiveTab(): string {
     return this.addressDraftTabId === this.tabStore.activeTabId ? this.addressDraft : '';
   }
@@ -2694,7 +2726,11 @@ export struct BrowserShell {
 
   private async completeNewStartTabFromEdge(transitionToken: number): Promise<void> {
     const dispatcher: DefaultBrowserCommandDispatcher | undefined = this.dispatcher;
-    if (dispatcher === undefined || !isAddressTransitionCurrent(transitionToken, this.addressTransitionToken)) {
+    if (!isAddressTransitionCurrent(transitionToken, this.addressTransitionToken)) {
+      return;
+    }
+    if (dispatcher === undefined) {
+      this.abortAddressTransition();
       return;
     }
     const draft: PendingTabDraft | undefined = this.pendingTabDraft;
@@ -2702,7 +2738,15 @@ export struct BrowserShell {
       this.springBackAddressGesture();
       return;
     }
-    const newTabId: TabId = await dispatcher.commitReservedTab(draft);
+    let newTabId: TabId;
+    try {
+      newTabId = await dispatcher.commitReservedTab(draft);
+    } catch (_error) {
+      if (isAddressTransitionCurrent(transitionToken, this.addressTransitionToken)) {
+        this.abortAddressTransition();
+      }
+      return;
+    }
     if (!isAddressTransitionCurrent(transitionToken, this.addressTransitionToken)) {
       return;
     }
@@ -4605,10 +4649,18 @@ export struct BrowserShell {
       return;
     }
     if (this.dispatcher === undefined) {
+      this.abortAddressTransition();
       return;
     }
     this.rememberTabViewState();
-    await this.dispatcher.activateTab(targetId);
+    try {
+      await this.dispatcher.activateTab(targetId);
+    } catch (_error) {
+      if (isAddressTransitionCurrent(transitionToken, this.addressTransitionToken)) {
+        this.abortAddressTransition();
+      }
+      return;
+    }
     if (!isAddressTransitionCurrent(transitionToken, this.addressTransitionToken)) {
       return;
     }
@@ -4796,7 +4848,7 @@ export struct BrowserShell {
         tabs: this.sceneTabs,
         pendingTab: this.pendingTabForRender(),
         activeIndex: this.sceneActiveTabIndex(),
-        rawDragX: this.rawDragX,
+        rawDragX: this.rawDragXForRender(),
         viewportWidth: this.viewportWidth,
         interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
           this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
@@ -4878,8 +4930,8 @@ export struct BrowserShell {
             viewportWidth: this.viewportWidth,
             viewportHeight: this.viewportHeight,
             topContentInset: this.topAvoidInset,
-            currentX: this.pageTranslateX,
-            previewX: this.adjacentTranslateX,
+            currentX: this.pageTranslateXForRender(),
+            previewX: this.adjacentTranslateXForRender(),
             currentHost: this.hostControllers.get(this.sceneActiveTabId),
             previewHost: this.previewHost(),
             currentThumbnail: this.thumbnailFor(this.sceneActiveTabId),
@@ -4954,7 +5006,7 @@ export struct BrowserShell {
               addressDraft: this.draftForSceneTab(),
               tabCount: this.tabStore.tabs.length,
               isPrivate: this.sceneTabForRender()?.isPrivate ?? false,
-              rawDragX: this.rawDragX,
+              rawDragX: this.rawDragXForRender(),
               viewportWidth: this.viewportWidth,
               interactionLocked: this.overviewProgress > 0 || this.gestureActive || this.isDragging ||
                 this.showStartPageCustomize || this.showLibrary || this.showDownloadManager,
@@ -5183,7 +5235,7 @@ export struct BrowserShell {
             // The customize sheet is a modal surface. Keep the whole sheet,
             // including its bottom safe-area region, above the fixed browser
             // chrome instead of letting the toolbar's zIndex cover it.
-            .zIndex(20)
+            .zIndex(50)
             .transition(
               TransitionEffect.asymmetric(
                 // Keep the entrance on the existing responsive spring. Only
