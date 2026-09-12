@@ -13,6 +13,8 @@ export const HARMONY_RADIUS_FLOATING: number = 20;
 export const HARMONY_RADIUS_SHEET: number = 24;
 export const HARMONY_RADIUS_PROGRESS: number = 2;
 
+/** Modal sheets must cover the shared address transition layer (z=40). */
+export const BROWSER_MODAL_Z_INDEX: number = 50;
 /** Shared motion tokens for the Safari-style overview and bottom sheets. */
 export const BROWSER_OVERVIEW_SCALE: number = 0.92;
 export const BROWSER_OVERVIEW_RADIUS: number = 28;

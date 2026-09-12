@@ -89,6 +89,7 @@ import {
 } from '../model/TabOverviewActions';
 import { topContentInsetFromAvoidRects } from '../model/WindowAvoidance';
 import {
+  BROWSER_MODAL_Z_INDEX,
   BROWSER_OVERVIEW_ANIMATION_DURATION_MS,
   BROWSER_OVERVIEW_TRANSITION_DURATION_MS,
   HARMONY_RADIUS_CARD,
@@ -5168,7 +5169,7 @@ export struct BrowserShell {
             .align(Alignment.Bottom)
             // The address transition layer is intentionally above the normal
             // bottom chrome at z=40; the modal manager must cover that layer.
-            .zIndex(50)
+            .zIndex(BROWSER_MODAL_Z_INDEX)
             .transition(
               TransitionEffect.asymmetric(
                 TransitionEffect.move(TransitionEdge.BOTTOM)
@@ -5200,7 +5201,7 @@ export struct BrowserShell {
             onClose: () => this.closeLibrary()
           })
             .align(Alignment.Bottom)
-            .zIndex(20)
+            .zIndex(BROWSER_MODAL_Z_INDEX)
             .transition(
               TransitionEffect.asymmetric(
                 TransitionEffect.move(TransitionEdge.BOTTOM)
@@ -5235,7 +5236,7 @@ export struct BrowserShell {
             // The customize sheet is a modal surface. Keep the whole sheet,
             // including its bottom safe-area region, above the fixed browser
             // chrome instead of letting the toolbar's zIndex cover it.
-            .zIndex(50)
+            .zIndex(BROWSER_MODAL_Z_INDEX)
             .transition(
               TransitionEffect.asymmetric(
                 // Keep the entrance on the existing responsive spring. Only

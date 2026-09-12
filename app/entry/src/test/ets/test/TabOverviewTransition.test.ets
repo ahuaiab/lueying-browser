@@ -21,6 +21,7 @@ import {
   TAB_OVERVIEW_CAPTION_FONT_SIZE
 } from '../../../main/ets/browser/model/TabOverviewActions';
 import { verticalOverviewGestureMotion } from '../../../main/ets/browser/model/TabGestureMotion';
+import { BROWSER_MODAL_Z_INDEX } from '../../../main/ets/browser/model/BrowserVisualMetrics';
 
 export default function tabOverviewTransitionTest() {
   describe('TabOverviewTransition', () => {
@@ -126,6 +127,10 @@ export default function tabOverviewTransitionTest() {
 
     it('keeps the address capsule above the returning bottom chrome', 0, () => {
       expect(tabOverviewAddressLayerZIndex() > tabOverviewBottomChromeZIndex(true)).assertTrue();
+    });
+
+    it('keeps modal sheets above the address transition layer', 0, () => {
+      expect(BROWSER_MODAL_Z_INDEX > tabOverviewAddressLayerZIndex()).assertTrue();
     });
 
     it('keeps the address capsule on one track during the live shrink', 0, () => {
