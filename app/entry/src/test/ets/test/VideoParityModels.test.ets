@@ -13,7 +13,8 @@ import {
   buildFrequentStartPageItems,
   sortStartPageItems,
   shouldRenderStartPageSection,
-  startPageBackgroundSource
+  startPageBackgroundSource,
+  startPageThumbnailMatchesBackground
 } from '../../../main/ets/browser/model/StartPageModels';
 import {
   ClosedTabStack,
@@ -256,6 +257,15 @@ export default function videoParityModelsTest() {
       expect(startPageBackgroundSource('system-gradient')).assertUndefined();
       expect(startPageBackgroundSource('datashare:///media/Photo/001.jpg'))
         .assertEqual('datashare:///media/Photo/001.jpg');
+    });
+
+    it('does not reuse a start-page frame after the background changes', 0, () => {
+      expect(startPageThumbnailMatchesBackground('system-gradient', 'system-gradient'))
+        .assertTrue();
+      expect(startPageThumbnailMatchesBackground('datashare:///media/Photo/old.jpg',
+        'datashare:///media/Photo/new.jpg')).assertFalse();
+      expect(startPageThumbnailMatchesBackground('', 'datashare:///media/Photo/new.jpg'))
+        .assertFalse();
     });
 
     it('routes address searches through the selected search engine', 0, () => {

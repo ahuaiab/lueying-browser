@@ -19,6 +19,7 @@ import {
   TabOverviewLivePageCloseFrame,
   tabOverviewLivePageCloseFrame
 } from '../model/TabOverviewActions';
+import { shouldRenderStableTabPreview } from '../model/SafariTabTransition';
 import { WebNodeHostController } from '../web/WebTabNode';
 import { availableContentHeight } from '../model/WindowAvoidance';
 
@@ -50,6 +51,14 @@ export struct BrowserTransitionScene {
   /** Horizontal close progress shared with the active transparent card shell. */
   @Param overviewCloseProgress: number = 0;
   @Param overviewCloseHorizontalOffset: number = 0;
+  /** True when the active card has a real frame that can own close pixels. */
+  @Param overviewCloseUsesThumbnail: boolean = false;
+  /**
+   * Card gesture revision. The close geometry lives in a non-observable Map
+   * in BrowserShell, so this observable token explicitly invalidates the
+   * mounted scene alongside TabOverview on every gesture frame.
+   */
+  @Param renderRevision: number = 0;
   /** Title rendered inside the same transformed layer as the live page. */
   @Param overviewCaptionTitle: string = '';
   /** The shared address capsule owns the caption while the card expands back. */
@@ -162,13 +171,20 @@ export struct BrowserTransitionScene {
   }
 
   private hasCurrentContent(): boolean {
-    return this.currentHost !== undefined || this.currentThumbnail !== undefined ||
-      this.currentIsStartPage || this.errorState !== undefined;
+    // During a thumbnail-owned card close the active card is the only visual
+    // owner. Removing the live scene from the tree is intentional: native
+    // ArkWeb surfaces can ignore an ancestor opacity/transform, and leaving
+    // one mounted would paint the old page at its stationary coordinates.
+    return !this.overviewCloseUsesThumbnail &&
+      (this.currentHost !== undefined || this.currentThumbnail !== undefined ||
+        this.currentIsStartPage || this.errorState !== undefined);
   }
 
   private hasPreviewContent(): boolean {
-    return this.previewHost !== undefined || this.previewThumbnail !== undefined ||
-      this.previewIsStartPage || this.previewKind === MotionPreviewKind.NEW_TAB;
+    return shouldRenderStableTabPreview(
+      this.previewHost !== undefined,
+      this.previewThumbnail !== undefined
+    );
   }
 
   private shouldShowPreview(): boolean {
@@ -239,18 +255,6 @@ export struct BrowserTransitionScene {
           .width('100%')
           .height('100%')
           .objectFit(ImageFit.Cover)
-          .hitTestBehavior(HitTestMode.None);
-      } else if (this.previewIsStartPage || this.previewKind === MotionPreviewKind.NEW_TAB) {
-        StartPage({
-          items: this.currentItems,
-          settings: this.settings,
-          pageTranslateX: 0,
-          onOpen: (_url: string) => undefined,
-          onAddFavorite: () => undefined,
-          onCustomize: () => undefined
-        })
-          .width('100%')
-          .height('100%')
           .hitTestBehavior(HitTestMode.None);
       }
     }
@@ -380,7 +384,11 @@ export struct BrowserTransitionScene {
       // overview together. Compensate for the full-window transform origin so
       // the live page scales around the active card's center, just like the
       // card shell does.
-      .opacity(this.livePageCloseFrame().opacity)
+      // ArkWeb native content can remain at its old surface position when an
+      // ancestor is translated. In that case TabCard renders the same cached
+      // page frame and owns the close animation; hide this live layer to avoid
+      // the old page leaking through the moving card shell.
+      .opacity(this.overviewCloseUsesThumbnail ? 0 : this.livePageCloseFrame().opacity)
       .scale({
         x: this.livePageCloseFrame().scale,
         y: this.livePageCloseFrame().scale,

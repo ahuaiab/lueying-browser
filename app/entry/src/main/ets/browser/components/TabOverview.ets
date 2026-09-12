@@ -15,6 +15,7 @@ import {
   tabOverviewSearchSlotHeightForProgress,
   tabOverviewTopPaddingForProgress,
   tabOverviewGridOpacityAtProgress,
+  shouldUseTabOverviewCloseThumbnail,
   tabOverviewBorderOwner
 } from '../model/TabOverviewActions';
 import { placeholderForFocus } from '../model/BrowserInteraction';
@@ -186,6 +187,13 @@ export struct TabOverview {
   }
 
   private panelOpacity(): number {
+    // During a horizontal card close the thumbnail becomes the visual owner
+    // of the active card. Keep the grid opaque for that interval; otherwise
+    // the normal live-page handoff fades the card out while its snapshot is
+    // still travelling with the shell.
+    if (this.activeCloseThumbnailVisible()) {
+      return 1;
+    }
     if (this.livePageTransform) {
       return tabOverviewGridOpacityAtProgress(this.overviewProgress, true);
     }
@@ -208,6 +216,20 @@ export struct TabOverview {
 
   private indexFor(tabId: TabId): number {
     return this.tabs.findIndex((tab: BrowserTabRecord) => tab.id === tabId);
+  }
+
+  private activeCloseThumbnailVisible(): boolean {
+    if (!this.livePageTransform || this.activeTabId.length === 0) {
+      return false;
+    }
+    return shouldUseTabOverviewCloseThumbnail(
+      this.cardProgressFor(this.activeTabId),
+      this.thumbnailFor(this.activeTabId) !== undefined
+    );
+  }
+
+  private cardUsesCloseThumbnail(tab: BrowserTabRecord): boolean {
+    return tab.id === this.activeTabId && this.activeCloseThumbnailVisible();
   }
 
   @Builder
@@ -264,8 +286,10 @@ export struct TabOverview {
         tabCount: this.tabs.length,
         cardHeight: TAB_OVERVIEW_LAYOUT.cardHeight,
         isActive: tab.id === this.activeTabId,
-        livePreview: this.livePageTransform && tab.id === this.activeTabId,
+        livePreview: this.livePageTransform && tab.id === this.activeTabId &&
+          !this.cardUsesCloseThumbnail(tab),
         livePreviewBorder: this.livePageTransform && tab.id === this.activeTabId &&
+          !this.cardUsesCloseThumbnail(tab) &&
           tabOverviewBorderOwner(this.overviewProgress, this.overviewClosing) === 'card',
         thumbnail: this.thumbnailFor(tab.id),
         closeProgress: this.cardProgressFor(tab.id),

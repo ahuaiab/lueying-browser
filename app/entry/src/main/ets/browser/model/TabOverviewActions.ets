@@ -242,6 +242,18 @@ export function tabOverviewLivePageCloseFrame(
 }
 
 /**
+ * Native ArkWeb layers do not reliably follow an ancestor transform while a
+ * card is being dismissed. Once a real thumbnail is available, let the card
+ * shell own the closing pixels so the page and its frame share one transform.
+ */
+export function shouldUseTabOverviewCloseThumbnail(
+  progress: number,
+  hasThumbnail: boolean
+): boolean {
+  return hasThumbnail && clampOverviewProgress(progress) > 0;
+}
+
+/**
  * The live page and its card shell must never paint the selection ring at the
  * same time.  The live page owns the ring while it is moving or expanding
  * back; the card shell takes ownership only after the overview has settled.

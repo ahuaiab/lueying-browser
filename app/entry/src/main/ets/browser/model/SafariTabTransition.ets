@@ -68,6 +68,18 @@ export function tabTransitionSceneVisualState(
   };
 }
 
+/**
+ * A transition preview must be backed by one stable owner. An asynchronous
+ * StartPage fallback can briefly mount a second image layer at the viewport
+ * edge, so the caller should wait for either a native host or a PixelMap.
+ */
+export function shouldRenderStableTabPreview(
+  hasPreviewHost: boolean,
+  hasPreviewThumbnail: boolean
+): boolean {
+  return hasPreviewHost || hasPreviewThumbnail;
+}
+
 export function sceneOffsetForIndex(index: number, activeIndex: number, pageWidth: number, dragX: number): number {
   const width: number = Math.max(1, finite(pageWidth));
   return (index - activeIndex) * width + finite(dragX);

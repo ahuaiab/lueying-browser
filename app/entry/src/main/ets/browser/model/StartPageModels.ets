@@ -16,6 +16,16 @@ export function startPageBackgroundSource(backgroundId: string): string | undefi
   return normalized;
 }
 
+/** A cached start-page frame is valid only for the background it captured. */
+export function startPageThumbnailMatchesBackground(
+  thumbnailBackgroundId: string,
+  currentBackgroundId: string
+): boolean {
+  const captured: string = thumbnailBackgroundId.trim();
+  const current: string = currentBackgroundId.trim();
+  return captured.length > 0 && captured === current;
+}
+
 export enum StartPageItemType {
   FAVORITE = 'favorite',
   FREQUENT = 'frequent'

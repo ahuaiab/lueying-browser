@@ -68,7 +68,8 @@ import {
 import {
   StartPageItem,
   StartPageItemType,
-  copyStartPageItem
+  copyStartPageItem,
+  startPageThumbnailMatchesBackground
 } from '../model/StartPageModels';
 import {
   TAB_OVERVIEW_GESTURE_CARD_HEIGHT,
@@ -80,6 +81,7 @@ import {
   tabOverviewSpringEasing,
   tabOverviewBorderOwner,
   tabOverviewCaptionHandoffOpacity,
+  shouldUseTabOverviewCloseThumbnail,
   shouldMountBottomBrowserBar,
   shouldMountAddressTransitionLayer,
   tabOverviewAddressLayerZIndex,
@@ -752,6 +754,10 @@ export struct BrowserShell {
   // native start-page surface for every blank card instead of drawing a
   // placeholder glyph.
   private startPageThumbnail: image.PixelMap | undefined = undefined;
+  // The start-page frame must not survive a background-image change. Keeping
+  // the source id next to the PixelMap makes stale-frame reuse impossible.
+  private startPageThumbnailBackgroundId: string = '';
+  private readonly startPageSnapshotInFlight: Set<TabId> = new Set();
   private readonly snapshotGenerations: Map<TabId, number> = new Map();
   private readonly snapshotInFlight: Set<TabId> = new Set();
   // Page/UI state belongs to a stable tab id, not to the currently rendered
@@ -789,6 +795,9 @@ export struct BrowserShell {
   private avoidAreaListener: ((data: window.AvoidAreaOptions) => void) | undefined = undefined;
   private windowSizeChangeListener: ((size: window.Size) => void) | undefined = undefined;
   private overviewTabRequestToken: number = 0;
+  // Cancels an overview-open wait when the user dismisses the overview or
+  // starts another tab operation before the active page frame is ready.
+  private overviewOpenToken: number = 0;
   private addressInputRemountToken: number = 0;
   // Invalidates an async adjacent-tab/new-tab animation when the user starts
   // another gesture or cancels the current one before the settle finishes.
@@ -1398,7 +1407,15 @@ export struct BrowserShell {
 
   private previewThumbnail(): image.PixelMap | undefined {
     const tab: BrowserTabRecord | undefined = this.previewTab();
-    return tab === undefined ? undefined : this.thumbnailFor(tab.id);
+    if (tab !== undefined) {
+      return this.thumbnailFor(tab.id);
+    }
+    // The final-tab gesture reserves its target without adding it to TabStore.
+    // Reuse the already rendered blank-tab frame instead of constructing a
+    // second asynchronous StartPage image layer at the edge of the gesture.
+    return this.previewKind === TabPreviewKind.NEW_TAB
+      ? this.currentStartPageThumbnail()
+      : undefined;
   }
 
   private sceneActiveTabIndex(): number {
@@ -2221,6 +2238,10 @@ export struct BrowserShell {
     this.addressInputFocused = false;
     this.runtimePort?.ensureBalanced();
     this.attachCurrentHosts();
+    const activeTab: BrowserTabRecord | undefined = this.activeTab();
+    if (activeTab !== undefined && activeTab.url === 'about:blank') {
+      this.scheduleStartPageThumbnail(activeTab.id);
+    }
     const pendingExternalUrl: string | undefined = takePendingExternalUrl();
     if (pendingExternalUrl !== undefined) {
       setTimeout(() => this.openExternalUrl(pendingExternalUrl), 0);
@@ -3134,8 +3155,28 @@ export struct BrowserShell {
   }
 
   private updateStartPageSettings(settings: BrowserSettings): void {
-    this.browserSettings = copyBrowserSettings(settings);
+    const nextSettings: BrowserSettings = copyBrowserSettings(settings);
+    const backgroundChanged: boolean = nextSettings.startPageBackgroundId !==
+      this.browserSettings.startPageBackgroundId;
+    this.browserSettings = nextSettings;
+    if (backgroundChanged) {
+      this.invalidateStartPageThumbnails();
+    }
     void this.repository?.saveSettings(this.browserSettings);
+  }
+
+  private invalidateStartPageThumbnails(): void {
+    this.startPageThumbnailBackgroundId = '';
+    for (const tab of this.tabStore.tabs) {
+      if (tab.url === 'about:blank') {
+        this.thumbnails.delete(tab.id);
+      }
+    }
+    this.cardRevision += 1;
+    const activeTab: BrowserTabRecord | undefined = this.activeTab();
+    if (activeTab !== undefined && activeTab.url === 'about:blank') {
+      this.scheduleStartPageThumbnail(activeTab.id);
+    }
   }
 
   private async chooseStartPageBackground(): Promise<void> {
@@ -3285,16 +3326,18 @@ export struct BrowserShell {
       this.closeTabOverview();
       return;
     }
-    this.openTabOverview();
+    void this.openTabOverview();
   }
 
-  private openTabOverview(releaseVelocityY: number = 0): void {
+  private async openTabOverview(releaseVelocityY: number = 0): Promise<void> {
     // An upward bar swipe mounts the overview at an interactive progress
     // between 0 and 1. Only a settled overview should short-circuit here;
     // otherwise the panel remains translucent at the release position.
     if (isOverviewSettled(this.overviewProgress)) {
       return;
     }
+    const openToken: number = this.overviewOpenToken + 1;
+    this.overviewOpenToken = openToken;
     this.overviewSearchProgress = 0;
     this.overviewClosing = false;
     this.rememberTabViewState();
@@ -3325,6 +3368,14 @@ export struct BrowserShell {
       'overview-opened-existing-tabs'
     );
     this.requestTabSnapshots();
+    // Do not expose the native ArkWeb surface to a horizontal card-close
+    // gesture before a PixelMap is ready. ArkWeb may ignore the ancestor
+    // transform used by the shared page scene, which otherwise makes the
+    // card frame move while the page remains at its old screen coordinates.
+    await this.waitForOverviewThumbnail(currentTabId);
+    if (openToken !== this.overviewOpenToken) {
+      return;
+    }
     this.settleOverview(1, () => {
       this.overviewEntryAnimation = false;
     }, BROWSER_OVERVIEW_TRANSITION_DURATION_MS, releaseVelocityY);
@@ -3383,6 +3434,7 @@ export struct BrowserShell {
   }
 
   private closeTabOverview(): void {
+    this.overviewOpenToken += 1;
     if (this.overviewProgress <= 0) {
       // A second bubbled close request can arrive after the target progress
       // has been published but before the reverse animation finishes. Do not
@@ -3571,17 +3623,29 @@ export struct BrowserShell {
   }
 
   private thumbnailFor(tabId: TabId): image.PixelMap | undefined {
+    const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
+      (item: BrowserTabRecord) => item.id === tabId
+    );
+    if (tab?.url === 'about:blank') {
+      // All blank tabs share the same native start page, but only while the
+      // cached frame belongs to the currently selected background.
+      return this.currentStartPageThumbnail();
+    }
     const cached: image.PixelMap | undefined = this.thumbnails.get(tabId);
     if (cached !== undefined) {
       return cached;
     }
-    const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
-      (item: BrowserTabRecord) => item.id === tabId
-    );
-    // All blank start tabs share the real native start-page snapshot. This
-    // avoids showing a synthetic placeholder while a newly-created tab is
-    // waiting for its first capture.
-    return tab?.url === 'about:blank' ? this.startPageThumbnail : undefined;
+    return undefined;
+  }
+
+  private currentStartPageThumbnail(): image.PixelMap | undefined {
+    if (!startPageThumbnailMatchesBackground(
+      this.startPageThumbnailBackgroundId,
+      this.browserSettings.startPageBackgroundId
+    )) {
+      return undefined;
+    }
+    return this.startPageThumbnail;
   }
 
   private scheduleSnapshot(tabId: TabId, controller: webview.WebviewController): void {
@@ -3622,18 +3686,25 @@ export struct BrowserShell {
       // BrowserTransitionScene owns the live Web node now. The previous
       // single-host id is retained as a compatibility fallback for a frame
       // that is still completing its native-tree migration.
-      return await snapshot.get(`native-tab-web-${tabId}`, {
+      return await snapshot.get(`transition-current-web-${tabId}`, {
         scale: 1,
         waitUntilRenderFinished: false
       });
     } catch (_error) {
       try {
-        return await snapshot.get('web-tab-host', {
+        return await snapshot.get(`native-tab-web-${tabId}`, {
           scale: 1,
           waitUntilRenderFinished: false
         });
-      } catch (_fallbackError) {
-        return undefined;
+      } catch (_legacyError) {
+        try {
+          return await snapshot.get('web-tab-host', {
+            scale: 1,
+            waitUntilRenderFinished: false
+          });
+        } catch (_fallbackError) {
+          return undefined;
+        }
       }
     }
   }
@@ -3657,6 +3728,39 @@ export struct BrowserShell {
       } catch (_fallbackError) {
         return undefined;
       }
+    }
+  }
+
+  private async waitForOverviewThumbnail(tabId: TabId): Promise<void> {
+    // The first capture may already be in flight from the overview request.
+    // Short bounded waits allow that capture to finish while keeping the
+    // overview responsive when a platform snapshot API is unavailable.
+    const retryDelays: number[] = [0, 80, 160, 280, 480, 640];
+    for (const delay of retryDelays) {
+      if (delay > 0) {
+        await new Promise<void>((resolve: () => void) => {
+          setTimeout(() => resolve(), delay);
+        });
+      }
+      if (this.thumbnailFor(tabId) !== undefined) {
+        return;
+      }
+      const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
+        (item: BrowserTabRecord) => item.id === tabId
+      );
+      if (tab === undefined || this.tabStore.activeTabId !== tabId || this.gestureActive) {
+        return;
+      }
+      const controller: webview.WebviewController | undefined = this.runtimePort?.controllerFor(tabId);
+      if (controller === undefined) {
+        if (tab.url === 'about:blank') {
+          await this.captureStartPageThumbnail(tabId);
+        }
+        continue;
+      }
+      const generation: number = (this.snapshotGenerations.get(tabId) ?? 0) + 1;
+      this.snapshotGenerations.set(tabId, generation);
+      await this.captureTabSnapshot(tabId, controller, generation);
     }
   }
 
@@ -3741,8 +3845,8 @@ export struct BrowserShell {
           ? await this.captureStartPageSnapshot()
           : await this.captureMountedSnapshot(tabId);
       }
-      if (pixel === undefined && tab.url === 'about:blank' && this.startPageThumbnail !== undefined) {
-        pixel = this.startPageThumbnail;
+      if (pixel === undefined && tab.url === 'about:blank') {
+        pixel = this.currentStartPageThumbnail();
       }
       if (pixel === undefined && !this.gestureActive) {
         pixel = await this.captureArkWebSnapshot(tabId, controller);
@@ -3777,6 +3881,7 @@ export struct BrowserShell {
         this.thumbnails.set(tabId, pixel);
         if (tab.url === 'about:blank') {
           this.startPageThumbnail = pixel;
+          this.startPageThumbnailBackgroundId = this.browserSettings.startPageBackgroundId;
         }
         this.tabStore.updateThumbnailKey(tabId, `thumbnail-${tabId}`);
         this.cardRevision += 1;
@@ -3791,14 +3896,30 @@ export struct BrowserShell {
     if (this.gestureActive || this.tabStore.activeTabId !== tabId) {
       return;
     }
-    const pixel: image.PixelMap | undefined = await this.captureStartPageSnapshot();
-    if (pixel === undefined || this.gestureActive || this.tabStore.activeTabId !== tabId) {
+    if (this.startPageSnapshotInFlight.has(tabId)) {
       return;
     }
-    this.startPageThumbnail = pixel;
-    this.thumbnails.set(tabId, pixel);
-    this.tabStore.updateThumbnailKey(tabId, `thumbnail-${tabId}`);
-    this.cardRevision += 1;
+    this.startPageSnapshotInFlight.add(tabId);
+    const capturedBackgroundId: string = this.browserSettings.startPageBackgroundId;
+    const startedBeforeGesture: boolean = !this.gestureActive;
+    try {
+      const pixel: image.PixelMap | undefined = await this.captureStartPageSnapshot();
+      if (pixel === undefined || (!startedBeforeGesture && this.gestureActive) ||
+        this.tabStore.activeTabId !== tabId ||
+        !startPageThumbnailMatchesBackground(
+          capturedBackgroundId,
+          this.browserSettings.startPageBackgroundId
+        )) {
+        return;
+      }
+      this.startPageThumbnail = pixel;
+      this.startPageThumbnailBackgroundId = capturedBackgroundId;
+      this.thumbnails.set(tabId, pixel);
+      this.tabStore.updateThumbnailKey(tabId, `thumbnail-${tabId}`);
+      this.cardRevision += 1;
+    } finally {
+      this.startPageSnapshotInFlight.delete(tabId);
+    }
   }
 
   private requestTabSnapshots(): void {
@@ -4589,6 +4710,17 @@ export struct BrowserShell {
     return this.cardHorizontalOffsetFor(this.overviewVisualTabIdForRender());
   }
 
+  private overviewCloseUsesThumbnailForRender(): boolean {
+    if (this.overviewProgress <= 0) {
+      return false;
+    }
+    const tabId: TabId = this.overviewVisualTabIdForRender();
+    return shouldUseTabOverviewCloseThumbnail(
+      this.cardProgressFor(tabId),
+      this.thumbnailFor(tabId) !== undefined
+    );
+  }
+
   private overviewPageFrameForRender(): TabOverviewPageFrame {
     return tabOverviewPageFrame(
       this.overviewProgress,
@@ -4710,9 +4842,7 @@ export struct BrowserShell {
             previewX: this.adjacentTranslateX,
             currentHost: this.hostControllers.get(this.sceneActiveTabId),
             previewHost: this.previewHost(),
-            currentThumbnail: this.sceneAddress() === 'about:blank'
-              ? undefined
-              : this.thumbnailFor(this.sceneActiveTabId),
+            currentThumbnail: this.thumbnailFor(this.sceneActiveTabId),
             previewThumbnail: this.previewThumbnail(),
             currentIsStartPage: this.sceneAddress() === 'about:blank' && this.errorState === undefined,
             previewIsStartPage: this.previewKind === TabPreviewKind.NEW_TAB ||
@@ -4725,6 +4855,8 @@ export struct BrowserShell {
             overviewFrame: this.overviewPageFrameForRender(),
             overviewCloseProgress: this.overviewCloseProgressForRender(),
             overviewCloseHorizontalOffset: this.overviewCloseHorizontalOffsetForRender(),
+            overviewCloseUsesThumbnail: this.overviewCloseUsesThumbnailForRender(),
+            renderRevision: this.cardRevision,
             overviewCaptionTitle: this.sceneActiveTab === undefined ? '' : tabOverviewTitleFor(
               lastValidUrlForTab(this.sceneActiveTab),
               this.sceneActiveTab.title

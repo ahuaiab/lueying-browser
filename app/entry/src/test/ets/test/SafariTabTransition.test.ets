@@ -8,12 +8,16 @@ import {
   sceneOffsetForIndex,
   shouldPrimeFinalTabPreview,
   shouldRenderAddressItem,
+  shouldRenderStableTabPreview,
   tabSceneKeys,
   nativeTabIndexForId,
   tabTransitionSceneVisualState
 } from '../../../main/ets/browser/model/SafariTabTransition';
 import { safariAddressItemWidth } from '../../../main/ets/browser/model/BrowserVisualMetrics';
-import { tabOverviewLivePageCloseFrame } from '../../../main/ets/browser/model/TabOverviewActions';
+import {
+  shouldUseTabOverviewCloseThumbnail,
+  tabOverviewLivePageCloseFrame
+} from '../../../main/ets/browser/model/TabOverviewActions';
 
 export default function safariTabTransitionTest() {
   describe('SafariTabTransition', () => {
@@ -56,6 +60,12 @@ export default function safariTabTransitionTest() {
         true
       );
       expect(visual.showPagePlus).assertFalse();
+    });
+
+    it('does not mount an asynchronous page as a transition fallback', 0, () => {
+      expect(shouldRenderStableTabPreview(false, false)).assertFalse();
+      expect(shouldRenderStableTabPreview(true, false)).assertTrue();
+      expect(shouldRenderStableTabPreview(false, true)).assertTrue();
     });
 
     it('rebases a committed target without changing its visible position', 0, () => {
@@ -107,6 +117,12 @@ export default function safariTabTransitionTest() {
       expect(settled.horizontalOffset).assertEqual(-200);
       expect(settled.scale.toFixed(3)).assertEqual('0.940');
       expect(settled.opacity.toFixed(3)).assertEqual('0.050');
+    });
+
+    it('uses the cached page frame for an active card close', 0, () => {
+      expect(shouldUseTabOverviewCloseThumbnail(0, true)).assertFalse();
+      expect(shouldUseTabOverviewCloseThumbnail(0.01, true)).assertTrue();
+      expect(shouldUseTabOverviewCloseThumbnail(1, false)).assertFalse();
     });
 
     it('keeps stable and pending scene keys unique', 0, () => {
