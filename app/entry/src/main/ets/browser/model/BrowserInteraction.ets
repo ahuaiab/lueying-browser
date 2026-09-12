@@ -96,6 +96,18 @@ export function shouldRetryTabSnapshot(snapshotUnavailable: boolean, attempt: nu
 }
 
 /**
+ * A cached frame does not make an in-flight capture safe to skip.  The
+ * overview must wait for the current capture to finish so a native ArkWeb
+ * surface cannot begin card-close while the frame is still stationary.
+ */
+export function shouldWaitForTabOverviewSnapshot(
+  hasThumbnail: boolean,
+  captureInFlight: boolean
+): boolean {
+  return captureInFlight || !hasThumbnail;
+}
+
+/**
  * Keep dynamic ArkWeb creation out of the overview overlay's layout pass.
  * The caller can animate the sheet away first and still cancel the request.
  */

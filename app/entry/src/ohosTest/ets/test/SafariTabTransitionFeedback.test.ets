@@ -14,6 +14,7 @@ import {
   syncAddressDraft,
   canStartAddressStripGesture,
   shouldWaitForOverviewClose,
+  shouldWaitForTabOverviewSnapshot,
   closedAddressEditorState,
   addressCollapsedTextPaddingFor,
   addressEditorLeftPaddingFor,
@@ -99,6 +100,12 @@ export default function safariTabTransitionFeedbackTest() {
       expect(shouldWaitForOverviewClose(0, true, false, false)).assertTrue();
       expect(shouldWaitForOverviewClose(0, false, false, true)).assertTrue();
       expect(shouldWaitForOverviewClose(0, false, false, false)).assertFalse();
+    });
+
+    it('waits for a fresh overview snapshot while capture is in flight', 0, () => {
+      expect(shouldWaitForTabOverviewSnapshot(true, true)).assertTrue();
+      expect(shouldWaitForTabOverviewSnapshot(true, false)).assertFalse();
+      expect(shouldWaitForTabOverviewSnapshot(false, false)).assertTrue();
     });
 
     it('keeps an intentionally empty editor draft empty', 0, () => {

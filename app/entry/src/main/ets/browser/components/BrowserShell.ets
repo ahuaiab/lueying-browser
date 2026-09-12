@@ -112,6 +112,7 @@ import {
   shouldRecoverMissingTabController,
   shouldRecreateBlankTabRuntime,
   shouldRetryTabSnapshot,
+  shouldWaitForTabOverviewSnapshot,
   shouldDismissOverviewBeforeCreatingTab,
   shouldWaitForOverviewClose,
   isOverviewSettled,
@@ -3771,7 +3772,9 @@ export struct BrowserShell {
           setTimeout(() => resolve(), delay);
         });
       }
-      if (this.thumbnailFor(tabId) !== undefined) {
+      const hasThumbnail: boolean = this.thumbnailFor(tabId) !== undefined;
+      const captureInFlight: boolean = this.snapshotInFlight.has(tabId);
+      if (!shouldWaitForTabOverviewSnapshot(hasThumbnail, captureInFlight)) {
         return;
       }
       const tab: BrowserTabRecord | undefined = this.tabStore.tabs.find(
@@ -3792,7 +3795,7 @@ export struct BrowserShell {
       // requestTabSnapshots() may already have started the native capture.
       // Do not advance its generation while it is in flight: that would make
       // the valid callback discard its own frame and leave a live-only card.
-      if (this.snapshotInFlight.has(tabId)) {
+      if (captureInFlight) {
         continue;
       }
       const generation: number = (this.snapshotGenerations.get(tabId) ?? 0) + 1;
