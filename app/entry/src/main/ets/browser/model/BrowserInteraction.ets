@@ -104,6 +104,22 @@ export function shouldDismissOverviewBeforeCreatingTab(overviewProgress: number)
 }
 
 /**
+ * A new tab must wait for both the visible overview animation and its async
+ * selection finalization. A zero progress value alone is not sufficient:
+ * the reverse animator can publish zero before finishOverviewClose() has
+ * rebased the scene and released the overlay transaction.
+ */
+export function shouldWaitForOverviewClose(
+  overviewProgress: number,
+  overviewClosing: boolean,
+  overviewAnimationClosing: boolean,
+  completionPending: boolean
+): boolean {
+  return completionPending || overviewClosing || overviewAnimationClosing ||
+    (Number.isFinite(overviewProgress) && overviewProgress > 0);
+}
+
+/**
  * A partially revealed overview is still an interactive transition.  It must
  * be allowed to settle to 1 after an upward swipe; treating any value above
  * zero as "already open" leaves the whole overview panel translucent.

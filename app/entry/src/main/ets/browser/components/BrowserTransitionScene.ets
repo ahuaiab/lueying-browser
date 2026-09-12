@@ -10,7 +10,8 @@ import { StartPageItem } from '../model/StartPageModels';
 import { TabPreviewKind as MotionPreviewKind } from '../model/TabGestureMotion';
 import {
   TabTransitionSceneVisualState,
-  tabTransitionSceneVisualState
+  tabTransitionSceneVisualState,
+  shouldPreferStableStartPageFrame
 } from '../model/SafariTabTransition';
 import {
   TAB_OVERVIEW_CAPTION_FONT_SIZE,
@@ -19,7 +20,7 @@ import {
   TabOverviewLivePageCloseFrame,
   tabOverviewLivePageCloseFrame
 } from '../model/TabOverviewActions';
-import { shouldRenderStableTabPreview } from '../model/SafariTabTransition';
+import { shouldRenderTabPreviewContent } from '../model/SafariTabTransition';
 import { WebNodeHostController } from '../web/WebTabNode';
 import { availableContentHeight } from '../model/WindowAvoidance';
 
@@ -46,6 +47,8 @@ export struct BrowserTransitionScene {
   @Param previewIsStartPage: boolean = false;
   @Param previewKind: MotionPreviewKind = MotionPreviewKind.NONE;
   @Param showPreview: boolean = false;
+  /** Keep the captured blank-page frame above a freshly mounted StartPage. */
+  @Param preferCurrentThumbnail: boolean = false;
   /** The live page itself is transformed into the active overview card. */
   @Param overviewFrame: TabOverviewPageFrame | undefined = undefined;
   /** Horizontal close progress shared with the active transparent card shell. */
@@ -181,15 +184,24 @@ export struct BrowserTransitionScene {
   }
 
   private hasPreviewContent(): boolean {
-    return shouldRenderStableTabPreview(
+    return shouldRenderTabPreviewContent(
+      this.visualState().showPreview,
+      this.previewIsStartPage,
       this.previewHost !== undefined,
       this.previewThumbnail !== undefined
     );
   }
 
+  private shouldShowStableCurrentFrame(): boolean {
+    return shouldPreferStableStartPageFrame(
+      this.currentIsStartPage,
+      this.preferCurrentThumbnail,
+      this.currentThumbnail !== undefined
+    );
+  }
+
   private shouldShowPreview(): boolean {
-    const visual: TabTransitionSceneVisualState = this.visualState();
-    return visual.showPreview && this.hasPreviewContent();
+    return this.hasPreviewContent();
   }
 
   @Builder
@@ -203,17 +215,33 @@ export struct BrowserTransitionScene {
           .clip(true)
           .hitTestBehavior(this.interactionLocked ? HitTestMode.None : HitTestMode.Default);
       } else if (this.currentIsStartPage) {
-        StartPage({
-          items: this.currentItems,
-          settings: this.settings,
-          pageTranslateX: 0,
-          onOpen: this.onOpen,
-          onAddFavorite: this.onAddFavorite,
-          onCustomize: this.onCustomize
-        })
+        Stack() {
+          // Keep the real StartPage mounted underneath the captured frame so
+          // its gallery image can decode before it becomes interactive again.
+          StartPage({
+            items: this.currentItems,
+            settings: this.settings,
+            pageTranslateX: 0,
+            onOpen: this.onOpen,
+            onAddFavorite: this.onAddFavorite,
+            onCustomize: this.onCustomize
+          })
+            .width('100%')
+            .height('100%')
+            .opacity(this.shouldShowStableCurrentFrame() ? 0 : 1)
+            .hitTestBehavior(this.shouldShowStableCurrentFrame() || this.interactionLocked
+              ? HitTestMode.None
+              : HitTestMode.Default);
+          if (this.shouldShowStableCurrentFrame() && this.currentThumbnail !== undefined) {
+            Image(this.currentThumbnail)
+              .width('100%')
+              .height('100%')
+              .objectFit(ImageFit.Cover)
+              .hitTestBehavior(HitTestMode.None);
+          }
+        }
           .width('100%')
-          .height('100%')
-          .hitTestBehavior(this.interactionLocked ? HitTestMode.None : HitTestMode.Default);
+          .height('100%');
       } else if (this.currentThumbnail !== undefined) {
         Image(this.currentThumbnail)
           .width('100%')
@@ -255,6 +283,15 @@ export struct BrowserTransitionScene {
           .width('100%')
           .height('100%')
           .objectFit(ImageFit.Cover)
+          .hitTestBehavior(HitTestMode.None);
+      } else if (this.previewIsStartPage) {
+        StartPage({
+          items: this.currentItems,
+          settings: this.settings,
+          pageTranslateX: 0
+        })
+          .width('100%')
+          .height('100%')
           .hitTestBehavior(HitTestMode.None);
       }
     }

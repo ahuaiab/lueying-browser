@@ -4,6 +4,8 @@ import {
   shouldPrimeFinalTabPreview,
   shouldRenderAddressItem,
   shouldRenderPendingTabPreview,
+  shouldRenderTabPreviewContent,
+  shouldPreferStableStartPageFrame,
   newTabHandoffVisual,
   addressPreviewOpacity
 } from '../../../main/ets/browser/model/SafariTabTransition';
@@ -11,6 +13,7 @@ import {
   addressEditorText,
   syncAddressDraft,
   canStartAddressStripGesture,
+  shouldWaitForOverviewClose,
   closedAddressEditorState,
   addressCollapsedTextPaddingFor,
   addressEditorLeftPaddingFor,
@@ -75,6 +78,27 @@ export default function safariTabTransitionFeedbackTest() {
       expect(finish.plusScale).assertEqual(1);
       expect(finish.placeholderScale).assertEqual(1);
       expect(finish.placeholderSlideProgress).assertEqual(1);
+    });
+
+    it('keeps the new start-page handoff on its captured frame', 0, () => {
+      expect(shouldPreferStableStartPageFrame(true, true, true)).assertTrue();
+      expect(shouldPreferStableStartPageFrame(true, true, false)).assertFalse();
+      expect(shouldPreferStableStartPageFrame(false, true, true)).assertFalse();
+      expect(shouldPreferStableStartPageFrame(true, false, true)).assertFalse();
+    });
+
+    it('keeps a new start-page preview mounted while its image is decoding', 0, () => {
+      expect(shouldRenderTabPreviewContent(true, true, false, false)).assertTrue();
+      expect(shouldRenderTabPreviewContent(true, false, true, false)).assertTrue();
+      expect(shouldRenderTabPreviewContent(true, false, false, true)).assertTrue();
+      expect(shouldRenderTabPreviewContent(false, true, false, false)).assertFalse();
+    });
+
+    it('waits for the overview close transaction instead of a guessed delay', 0, () => {
+      expect(shouldWaitForOverviewClose(1, false, false, false)).assertTrue();
+      expect(shouldWaitForOverviewClose(0, true, false, false)).assertTrue();
+      expect(shouldWaitForOverviewClose(0, false, false, true)).assertTrue();
+      expect(shouldWaitForOverviewClose(0, false, false, false)).assertFalse();
     });
 
     it('keeps an intentionally empty editor draft empty', 0, () => {

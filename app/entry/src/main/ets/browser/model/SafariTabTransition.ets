@@ -80,6 +80,34 @@ export function shouldRenderStableTabPreview(
   return hasPreviewHost || hasPreviewThumbnail;
 }
 
+/**
+ * A blank start tab has a real native page even before its image PixelMap is
+ * ready. Keep that page in the transition tree so a freshly selected image
+ * cannot leave a white hole at the incoming edge.
+ */
+export function shouldRenderTabPreviewContent(
+  showPreview: boolean,
+  previewIsStartPage: boolean,
+  hasPreviewHost: boolean,
+  hasPreviewThumbnail: boolean
+): boolean {
+  return showPreview && (previewIsStartPage || hasPreviewHost || hasPreviewThumbnail);
+}
+
+/**
+ * Keep a blank tab on its captured frame while a newly committed start page
+ * is handing the address capsule back to the normal browser chrome. The
+ * native Image frame is already rendered, while a freshly mounted StartPage
+ * may still be waiting for its gallery image to decode.
+ */
+export function shouldPreferStableStartPageFrame(
+  isStartPage: boolean,
+  handoffActive: boolean,
+  hasThumbnail: boolean
+): boolean {
+  return isStartPage && handoffActive && hasThumbnail;
+}
+
 export function sceneOffsetForIndex(index: number, activeIndex: number, pageWidth: number, dragX: number): number {
   const width: number = Math.max(1, finite(pageWidth));
   return (index - activeIndex) * width + finite(dragX);

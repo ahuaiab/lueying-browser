@@ -113,6 +113,7 @@ import {
   shouldRecreateBlankTabRuntime,
   shouldRetryTabSnapshot,
   shouldDismissOverviewBeforeCreatingTab,
+  shouldWaitForOverviewClose,
   isOverviewSettled,
   shouldMountTabWebHost,
   shouldRefreshHostsForViewport,
@@ -798,6 +799,9 @@ export struct BrowserShell {
   // Cancels an overview-open wait when the user dismisses the overview or
   // starts another tab operation before the active page frame is ready.
   private overviewOpenToken: number = 0;
+  // Resolves only after the reverse overview animation and its async scene
+  // finalization have both completed. A duration guess is not a safe barrier.
+  private readonly overviewCloseWaiters: Array<() => void> = [];
   private addressInputRemountToken: number = 0;
   // Invalidates an async adjacent-tab/new-tab animation when the user starts
   // another gesture or cancels the current one before the settle finishes.
@@ -3441,6 +3445,7 @@ export struct BrowserShell {
       // clear the animation flags in that window.
       if (!this.overviewClosing) {
         this.overviewAnimationClosing = false;
+        this.resolveOverviewCloseWaiters();
       }
       return;
     }
@@ -3477,8 +3482,32 @@ export struct BrowserShell {
         currentUrlBefore,
         webViewReattached,
         pageSnapshotRestored
+      ).then(
+        () => this.resolveOverviewCloseWaiters(),
+        () => this.resolveOverviewCloseWaiters()
       );
     }, BROWSER_OVERVIEW_TRANSITION_DURATION_MS);
+  }
+
+  private resolveOverviewCloseWaiters(): void {
+    const waiters: Array<() => void> = this.overviewCloseWaiters.splice(0);
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  private waitForOverviewCloseCompletion(): Promise<void> {
+    if (!shouldWaitForOverviewClose(
+      this.overviewProgress,
+      this.overviewClosing,
+      this.overviewAnimationClosing,
+      this.overviewCloseWaiters.length > 0
+    )) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve: () => void) => {
+      this.overviewCloseWaiters.push(resolve);
+    });
   }
 
   /**
@@ -3536,11 +3565,11 @@ export struct BrowserShell {
   private async createNewTabFromOverview(isPrivate: boolean): Promise<void> {
     const token: number = this.overviewTabRequestToken + 1;
     this.overviewTabRequestToken = token;
-    if (shouldDismissOverviewBeforeCreatingTab(this.overviewProgress)) {
+    if (shouldDismissOverviewBeforeCreatingTab(this.overviewProgress) ||
+      this.overviewClosing || this.overviewAnimationClosing) {
+      const closeCompletion: Promise<void> = this.waitForOverviewCloseCompletion();
       this.closeTabOverview();
-      await new Promise<void>((resolve: () => void) => {
-        setTimeout(() => resolve(), BROWSER_OVERVIEW_TRANSITION_DURATION_MS);
-      });
+      await closeCompletion;
       if (token !== this.overviewTabRequestToken) {
         return;
       }
@@ -3754,8 +3783,16 @@ export struct BrowserShell {
       const controller: webview.WebviewController | undefined = this.runtimePort?.controllerFor(tabId);
       if (controller === undefined) {
         if (tab.url === 'about:blank') {
-          await this.captureStartPageThumbnail(tabId);
+          if (!this.startPageSnapshotInFlight.has(tabId)) {
+            await this.captureStartPageThumbnail(tabId);
+          }
         }
+        continue;
+      }
+      // requestTabSnapshots() may already have started the native capture.
+      // Do not advance its generation while it is in flight: that would make
+      // the valid callback discard its own frame and leave a live-only card.
+      if (this.snapshotInFlight.has(tabId)) {
         continue;
       }
       const generation: number = (this.snapshotGenerations.get(tabId) ?? 0) + 1;
@@ -4845,6 +4882,7 @@ export struct BrowserShell {
             currentThumbnail: this.thumbnailFor(this.sceneActiveTabId),
             previewThumbnail: this.previewThumbnail(),
             currentIsStartPage: this.sceneAddress() === 'about:blank' && this.errorState === undefined,
+            preferCurrentThumbnail: this.addressHandoffActive && this.sceneAddress() === 'about:blank',
             previewIsStartPage: this.previewKind === TabPreviewKind.NEW_TAB ||
               this.previewTab()?.url === 'about:blank',
             previewKind: this.previewKind,
